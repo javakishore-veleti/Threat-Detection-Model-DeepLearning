@@ -12,6 +12,15 @@
 
     "setup-venv-daily": "conda run --prefix $HOME/$npm_package_config_venv_path python --version && conda run --prefix $HOME/$npm_package_config_venv_path uv pip install . && (grep -q 'alias pytorch_project_tdm=' ~/.zshrc 2>/dev/null || printf '\\nalias pytorch_project_tdm=\"conda activate %s\"\\n' \"$HOME/$npm_package_config_venv_path\" >> ~/.zshrc) && echo '' && echo '=====================================' && echo '  Env ready!' && echo '  Run: source ~/.zshrc  (first time only)' && echo '  Then: pytorch_project_tdm' && echo '====================================='",
 
+    "pipeline": "conda run --prefix $HOME/$npm_package_config_venv_path python scripts/run_pipeline.py --config configs/default.yaml",
+    "pipeline:from": "conda run --prefix $HOME/$npm_package_config_venv_path python scripts/run_pipeline.py --config configs/default.yaml --start-from",
+    "download-data": "conda run --prefix $HOME/$npm_package_config_venv_path python scripts/download_data.py --config configs/default.yaml",
+    "preprocess": "conda run --prefix $HOME/$npm_package_config_venv_path python scripts/preprocess.py --config configs/default.yaml",
+    "train": "conda run --prefix $HOME/$npm_package_config_venv_path python scripts/train.py --config configs/default.yaml",
+    "train:resume": "conda run --prefix $HOME/$npm_package_config_venv_path python scripts/train.py --config configs/default.yaml --resume outputs/checkpoints/last.pt",
+    "evaluate": "conda run --prefix $HOME/$npm_package_config_venv_path python scripts/evaluate.py --config configs/default.yaml",
+    "predict": "conda run --prefix $HOME/$npm_package_config_venv_path python scripts/predict.py --config configs/default.yaml",
+
     "teardown": "conda env remove --prefix $HOME/$npm_package_config_venv_path -y && echo 'Env removed.'"
   }
 }
