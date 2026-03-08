@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core.common.wfs.dtos import WfReq, WfResp
+from core.config import load_config
 from core.logger import get_logger
 
 log = get_logger(__name__)
@@ -34,15 +35,18 @@ def parse_args():
 def main():
     args = parse_args()
 
+    cfg = load_config(args.pipeline, args.config)
+
     req = WfReq(
         pipeline=args.pipeline,
         start_from=args.start_from,
         resume=args.resume,
         config_path=args.config,
+        config=cfg,
     )
     resp = WfResp()
 
-    log.debug("Starting pipeline: %s", args.pipeline)
+    log.debug("Starting pipeline: %s (config: %d keys)", args.pipeline, len(cfg))
 
     module = importlib.import_module(f"pipelines.{args.pipeline}.main")
     pipeline_cls = getattr(module, "Pipeline")

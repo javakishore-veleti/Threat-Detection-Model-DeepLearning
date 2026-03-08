@@ -11,6 +11,7 @@ import pandas as pd
 
 from core.common.wfs.dtos import WfReq, WfResp
 from core.common.wfs.interfaces import WfTask
+from core.config import get_cfg
 from core.logger import get_logger
 
 log = get_logger(__name__)
@@ -36,7 +37,7 @@ class Cleaning(WfTask):
         frames: dict[str, pd.DataFrame] = {}
         labels: dict[str, pd.DataFrame] = {}
         fill_medians: pd.Series | None = None
-        categorical_fill = "UNKNOWN"
+        categorical_fill = get_cfg(req.config, "cleaning.categorical_fill", "UNKNOWN")
 
         for split_name, filename in splits_config.items():
             if raw_frames and split_name in raw_frames:
@@ -87,10 +88,11 @@ class Cleaning(WfTask):
         log.debug("Released raw_frames from ctx_data to free memory")
 
         split_names = list(splits_config.keys())
-        for i, name in enumerate(split_names):
-            key_prefix = "train" if i == 0 else ("val" if "val" in name else "test")
-            resp.ctx_data[f"{key_prefix}_df"] = frames[name]
-            resp.ctx_data[f"{key_prefix}_labels"] = labels[name]
+        df_keys = req.df_keys
+        label_keys = req.label_keys
+        for df_key, lbl_key, split_name in zip(df_keys, label_keys, split_names):
+            resp.ctx_data[df_key] = frames[split_name]
+            resp.ctx_data[lbl_key] = labels[split_name]
 
         resp.ctx_data["feature_columns"] = list(frames[split_names[0]].columns)
         resp.ctx_data["cleaned_splits"] = split_names

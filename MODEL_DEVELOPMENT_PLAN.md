@@ -8,12 +8,44 @@
 
 | Layer | Status | What Exists |
 |---|---|---|
-| **Framework** | DONE | `src/main.py` facade, `core/common/wfs/` (interfaces, DTOs), `core/logger.py`, all 5 sub-workflow facades, `package.json` commands |
-| **Download** | DONE | `kaggle_beth.py` — idempotent Kaggle download with marker file |
-| **Preprocessing** | 1 of 5 done | `data_analysis.py` — v03 report with column classification, analyst insights, educational deep-dive |
+| **Config** | DONE | `configs/cyber_attack_detection/default.yaml` — all dataset-specific constants externalized. `core/config.py` — YAML loader with dot-path accessor, split key derivation, column helpers |
+| **Framework** | DONE | `src/main.py` facade (loads config into `req.config`), `core/common/wfs/` (interfaces, DTOs with `req.df_keys`/`req.label_keys` properties), `core/logger.py`, all 5 sub-workflow facades, `package.json` commands |
+| **Download** | DONE | `kaggle_beth.py` — idempotent Kaggle download, reads dataset ID and paths from config |
+| **Preprocessing** | 3 of 5 done | `data_analysis.py` (v04 report, config-driven), `cleaning.py` (config-driven), `feature_engineering.py` (generic engine reads feature specs from YAML) |
 | **Models** | Empty | Facade ready, `tasks/` empty |
 | **Training** | Empty | Facade ready, `tasks/` empty |
 | **Inference** | Empty | Facade ready, `tasks/` empty |
+
+## Config-Driven Architecture
+
+All dataset-specific constants live in `configs/<pipeline>/default.yaml`. Tasks read from
+`req.config` instead of hardcoding values. To adapt this pipeline for a new dataset:
+
+1. Copy `configs/cyber_attack_detection/default.yaml` to `configs/<new_pipeline>/default.yaml`
+2. Update dataset name, source, paths, splits, column classification, feature definitions
+3. Zero Python code changes required
+
+**Key config sections:**
+
+| Section | What It Controls |
+|---|---|
+| `dataset` | Name, subtitle, source (Kaggle ID, URL), paths (data_dir, report_dir) |
+| `splits` | Map of split name → CSV filename. Key order determines train/val/test assignment |
+| `split_prefixes` | Map of split name → short prefix (e.g., training → train) for ctx_data keys |
+| `columns` | Full column classification: true_numeric, categorical_ids, string_categorical, complex_drop, parse_then_drop, labels |
+| `features.structured` | Declarative feature specs: eq, lt, gt_quantile, binned — column names and thresholds |
+| `features.args_parsing` | Args column parsing rules: path signals, flag signals, patterns to match |
+| `cleaning` | categorical_fill value |
+| `report` | Version string, whether to copy to repo root |
+| `analysis` | drift_threshold, sample_size, random_state |
+
+**Helper functions in `core/config.py`:**
+- `load_config(pipeline, override_path)` — loads YAML, expands `~` in paths
+- `get_cfg(cfg, "dot.path", default)` — nested dict access
+- `split_keys(cfg)` — derives `(df_keys, label_keys)` from splits config
+- `col_names(cfg, "category")` — get column name list
+- `label_cols(cfg)` — get `[target, auxiliary]` label columns
+- `build_column_classification(cfg)` — build full classification dict for reports
 
 ---
 

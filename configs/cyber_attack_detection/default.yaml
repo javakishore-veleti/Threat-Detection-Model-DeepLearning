@@ -1,0 +1,153 @@
+# =============================================================================
+# Cyber Attack Detection — Pipeline Configuration
+# =============================================================================
+# This file contains ALL dataset-specific constants. To adapt this pipeline for
+# a new dataset, copy this file, update the values, and pass --config <path>.
+# Zero Python code changes required.
+# =============================================================================
+
+dataset:
+  name: "BETH Dataset"
+  subtitle: "Biased Evaluation of Traces from Honeypots"
+  source:
+    provider: kaggle
+    dataset_id: "katehighnam/beth-dataset"
+    url: "https://www.kaggle.com/datasets/katehighnam/beth-dataset"
+  paths:
+    data_dir: "~/python_venvs/datasets/kaggle/beth-dataset"
+    report_dir: "~/python_venvs/datasets/kaggle/beth-dataset/reports"
+
+# ---------------------------------------------------------------------------
+# Splits — map logical name → CSV filename
+# ---------------------------------------------------------------------------
+# The key order determines DF_KEYS assignment: first = train, second = val, third = test.
+# Prefix map can be overridden below; defaults derive from the split name.
+splits:
+  training: "labelled_training_data.csv"
+  validation: "labelled_validation_data.csv"
+  testing: "labelled_testing_data.csv"
+
+split_prefixes:
+  training: train
+  validation: val
+  testing: test
+
+# ---------------------------------------------------------------------------
+# Column classification — how each column should be treated
+# ---------------------------------------------------------------------------
+columns:
+  true_numeric:
+    names: [timestamp, argsNum, returnValue]
+    treatment: "Scale with StandardScaler. Arithmetic relationships are meaningful."
+    detail: >
+      timestamp = seconds since start (ordering matters).
+      argsNum = count of arguments (more args = more complex call).
+      returnValue = syscall result (0 = success, negative = error, positive = info).
+
+  categorical_ids:
+    names: [processId, threadId, parentProcessId, userId, mountNamespace, eventId]
+    treatment: >
+      Label-encode. Do NOT scale as numeric — the values are identifiers, not quantities.
+    detail: >
+      processId/threadId/parentProcessId = OS-assigned instance IDs, recycled over time.
+      PID 500 is not 'more' than PID 250.
+      userId = Linux UID (0=root, 65534=nobody, etc.) — each number is a distinct identity.
+      mountNamespace = kernel namespace ID (container boundary). Opaque identifiers.
+      eventId = maps to a specific syscall type (e.g., 157=prctl). An enum, not a measurement.
+
+  string_categorical:
+    names: [processName, hostName, eventName]
+    treatment: "Label-encode with UNKNOWN handling for unseen values in val/test."
+    detail: >
+      processName = program name (systemd, sshd, etc.).
+      hostName = server identifier.
+      eventName = human-readable syscall name.
+
+  complex_drop:
+    names: [stackAddresses]
+    treatment: "Drop — not usable without deep binary analysis."
+    detail: >
+      stackAddresses = list of memory addresses from the call stack.
+      Requires binary analysis expertise to extract useful features.
+
+  parse_then_drop:
+    names: [args]
+    treatment: "Parse in feature engineering to extract binary features, then drop raw string."
+    detail: >
+      args = nested JSON-like string with syscall argument details. Contains file paths,
+      flags, and argument values. Data analysis revealed STRONG attack signals:
+      normal ops access /proc/ 34% of the time vs 0.4% in attacks (90x difference),
+      normal has 13x more write flags than attacks. Extract binary features then drop.
+
+  labels:
+    target: evil
+    auxiliary: sus
+    treatment: >
+      Separate from features before any transformation.
+      evil = target, sus = auxiliary signal for threshold tuning.
+    detail: >
+      evil: 0 = normal, 1 = attack. Training has 0 attacks (anomaly detection setup).
+      sus: 0 = normal, 1 = suspicious. Weak label available even in training.
+
+# ---------------------------------------------------------------------------
+# Cleaning
+# ---------------------------------------------------------------------------
+cleaning:
+  categorical_fill: "UNKNOWN"
+
+# ---------------------------------------------------------------------------
+# Feature engineering — declarative feature definitions
+# ---------------------------------------------------------------------------
+features:
+  structured:
+    - name: is_root
+      type: eq
+      column: userId
+      value: 0
+    - name: return_negative
+      type: lt
+      column: returnValue
+      value: 0
+    - name: return_category
+      type: binned
+      column: returnValue
+    - name: is_child_of_init
+      type: eq
+      column: parentProcessId
+      value: 1
+    - name: is_orphan
+      type: eq
+      column: parentProcessId
+      value: 0
+    - name: is_high_args
+      type: gt_quantile
+      column: argsNum
+      quantile: 0.95
+
+  args_parsing:
+    source_column: args
+    path_arg_names: [pathname, filename]
+    path_signals:
+      - { name: args_touches_proc, pattern: "/proc/" }
+      - { name: args_touches_etc, pattern: "/etc/" }
+      - { name: args_is_hidden_path, pattern: "/." }
+    flag_signals:
+      - name: args_has_write_flag
+        arg_name: flags
+        patterns: [WRONLY, RDWR, CREAT]
+    has_pathname_feature: args_has_pathname
+
+# ---------------------------------------------------------------------------
+# Report settings
+# ---------------------------------------------------------------------------
+report:
+  version: "v04"
+  copy_to_repo_root: true
+
+# ---------------------------------------------------------------------------
+# Analysis parameters
+# ---------------------------------------------------------------------------
+analysis:
+  drift_threshold: 2.0
+  sample_size: 50000
+  random_state: 42

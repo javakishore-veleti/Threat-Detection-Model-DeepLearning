@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BETH Dataset — Cybersecurity Data Analysis Report v04</title>
+<title>BETH Dataset — Data Analysis Report v04</title>
 <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
                          sans-serif; max-width: 1200px; margin: 0 auto;
@@ -70,9 +70,9 @@
 <body>
 
 <div class="banner">
-    <h1>BETH Dataset — Cybersecurity Data Analysis Report</h1>
+    <h1>BETH Dataset — Data Analysis Report</h1>
     <p>Version: v04 &nbsp;|&nbsp;
-       Generated: 2026-03-08T16:27:53.421211+00:00 &nbsp;|&nbsp;
+       Generated: 2026-03-08T16:42:56.998600+00:00 &nbsp;|&nbsp;
        Biased Evaluation of Traces from Honeypots</p>
 </div>
 
@@ -164,7 +164,8 @@
                 <td><span style="background:#dc3545;color:white;padding:2px 8px;
                     border-radius:3px;font-size:0.8em">Categorical ID (looks numeric!)</span></td>
                 <td><code>processId</code>, <code>threadId</code>, <code>parentProcessId</code>, <code>userId</code>, <code>mountNamespace</code>, <code>eventId</code></td>
-                <td style="font-size:0.9em">Label-encode. Do NOT scale as numeric — the values are identifiers, not quantities.</td>
+                <td style="font-size:0.9em">Label-encode. Do NOT scale as numeric — the values are identifiers, not quantities.
+</td>
             </tr>
             <tr>
                 <td><span style="background:#6f42c1;color:white;padding:2px 8px;
@@ -188,7 +189,8 @@
                 <td><span style="background:#fd7e14;color:white;padding:2px 8px;
                     border-radius:3px;font-size:0.8em">Labels (not features)</span></td>
                 <td><code>evil</code>, <code>sus</code></td>
-                <td style="font-size:0.9em">Separate from features before any transformation. evil = target, sus = auxiliary signal for threshold tuning.</td>
+                <td style="font-size:0.9em">Separate from features before any transformation. evil = target, sus = auxiliary signal for threshold tuning.
+</td>
             </tr>
 </table>
 
@@ -1090,7 +1092,6 @@ LOW cardinality = easy to encode. HIGH cardinality = needs label encoding (not o
 <footer style="margin-top:40px;padding-top:16px;border-top:1px solid #ddd;
                color:#999;font-size:0.85em">
     BETH Dataset Analysis v04 &nbsp;|&nbsp;
-    Cyber Attack Detection Pipeline &nbsp;|&nbsp;
     Report generated programmatically by the data_analysis task
 </footer>
 

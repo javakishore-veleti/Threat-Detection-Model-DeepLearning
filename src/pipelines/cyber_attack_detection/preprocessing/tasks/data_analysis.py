@@ -1,4 +1,9 @@
-"""Programmatic EDA — generates versioned JSON + HTML reports with cybersecurity analyst insights."""
+"""Programmatic EDA — generates versioned JSON + HTML reports with cybersecurity analyst insights.
+
+All dataset-specific constants (splits, columns, report paths, branding) are
+read from req.config (loaded from configs/<pipeline>/default.yaml). This makes
+the task reusable for any tabular dataset without code changes.
+"""
 
 import json
 import shutil
@@ -10,113 +15,43 @@ import pandas as pd
 
 from core.common.wfs.dtos import WfReq, WfResp
 from core.common.wfs.interfaces import WfTask
+from core.config import (
+    build_column_classification,
+    col_names,
+    get_cfg,
+    label_cols,
+)
 from core.logger import get_logger
 
 log = get_logger(__name__)
-
-REPORT_DIR = Path.home() / "python_venvs" / "datasets" / "kaggle" / "beth-dataset" / "reports"
-REPORT_VERSION = "v04"
-JSON_FILE = REPORT_DIR / f"data_analysis_report_{REPORT_VERSION}.json"
-HTML_FILE = REPORT_DIR / f"data_analysis_report_{REPORT_VERSION}.html"
-
-SPLITS = {
-    "training": "labelled_training_data.csv",
-    "validation": "labelled_validation_data.csv",
-    "testing": "labelled_testing_data.csv",
-}
-
-# -----------------------------------------------------------------------
-# Column classification — the analyst's view of what each column REALLY is
-# -----------------------------------------------------------------------
-# Columns that pandas reads as int64/float64 but are actually categorical
-# identifiers (the numeric value has no arithmetic meaning).
-CATEGORICAL_IDS = ["processId", "threadId", "parentProcessId", "userId",
-                   "mountNamespace", "eventId"]
-
-# Columns that are truly numeric (arithmetic on them is meaningful)
-TRUE_NUMERIC = ["timestamp", "argsNum", "returnValue"]
-
-# String columns (already detected as object dtype by pandas)
-STRING_CATEGORICAL = ["processName", "hostName", "eventName"]
-
-# Columns to drop (stackAddresses only — args is parsed for features in feature_engineering)
-COMPLEX_DROP = ["stackAddresses"]
-
-# Columns to parse in feature engineering then drop (raw string not usable by model directly)
-PARSE_THEN_DROP = ["args"]
-
-# Labels (not features)
-LABEL_COLS = ["evil", "sus"]
-
-COLUMN_CLASSIFICATION = {
-    "true_numeric": {
-        "columns": TRUE_NUMERIC,
-        "treatment": "Scale with StandardScaler. Arithmetic relationships are meaningful.",
-        "detail": (
-            "timestamp = seconds since start (ordering matters). "
-            "argsNum = count of arguments (more args = more complex call). "
-            "returnValue = syscall result (0 = success, negative = error, positive = info)."
-        ),
-    },
-    "categorical_id": {
-        "columns": CATEGORICAL_IDS,
-        "treatment": "Label-encode. Do NOT scale as numeric — the values are identifiers, "
-                     "not quantities.",
-        "detail": (
-            "processId/threadId/parentProcessId = OS-assigned instance IDs, recycled over "
-            "time. PID 500 is not 'more' than PID 250. "
-            "userId = Linux UID (0=root, 65534=nobody, etc.) — each number is a distinct "
-            "identity, not a quantity. "
-            "mountNamespace = kernel namespace ID (container boundary). The billion-range "
-            "numbers are opaque identifiers. "
-            "eventId = maps to a specific syscall type (e.g., 157=prctl). It's an enum, "
-            "not a measurement."
-        ),
-    },
-    "string_categorical": {
-        "columns": STRING_CATEGORICAL,
-        "treatment": "Label-encode with UNKNOWN handling for unseen values in val/test.",
-        "detail": (
-            "processName = program name (systemd, sshd, etc.). "
-            "hostName = server identifier. "
-            "eventName = human-readable syscall name."
-        ),
-    },
-    "complex_drop": {
-        "columns": COMPLEX_DROP,
-        "treatment": "Drop — not usable without deep binary analysis.",
-        "detail": (
-            "stackAddresses = list of memory addresses from the call stack. "
-            "Requires binary analysis expertise to extract useful features."
-        ),
-    },
-    "parse_then_drop": {
-        "columns": PARSE_THEN_DROP,
-        "treatment": "Parse in feature engineering to extract binary features, then drop raw string.",
-        "detail": (
-            "args = nested JSON-like string with syscall argument details. Contains file paths, "
-            "flags, and argument values. Data analysis revealed STRONG attack signals: "
-            "normal ops access /proc/ 34% of the time vs 0.4% in attacks (90x difference), "
-            "normal has 13x more write flags than attacks. Extract binary features "
-            "(args_touches_proc, args_touches_etc, args_has_write_flag, args_is_hidden_path, "
-            "args_has_pathname) then drop the raw column."
-        ),
-    },
-    "labels": {
-        "columns": LABEL_COLS,
-        "treatment": "Separate from features before any transformation. evil = target, "
-                     "sus = auxiliary signal for threshold tuning.",
-        "detail": (
-            "evil: 0 = normal, 1 = attack. Training has 0 attacks (anomaly detection setup). "
-            "sus: 0 = normal, 1 = suspicious. Weak label available even in training."
-        ),
-    },
-}
 
 
 class DataAnalysis(WfTask):
 
     def execute(self, req: WfReq, resp: WfResp) -> WfResp:
+        cfg = req.config
+
+        splits = cfg.get("splits", {})
+        report_version = get_cfg(cfg, "report.version", "v01")
+        report_dir = Path(get_cfg(cfg, "dataset.paths.report_dir", "."))
+        dataset_name = get_cfg(cfg, "dataset.name", "Dataset")
+
+        true_numeric = col_names(cfg, "true_numeric")
+        categorical_ids = col_names(cfg, "categorical_ids")
+        string_categorical = col_names(cfg, "string_categorical")
+        complex_drop = col_names(cfg, "complex_drop")
+        parse_then_drop = col_names(cfg, "parse_then_drop")
+        labels = label_cols(cfg)
+        column_classification = build_column_classification(cfg)
+
+        self._cfg = cfg
+        self._true_numeric = true_numeric
+        self._categorical_ids = categorical_ids
+        self._string_categorical = string_categorical
+        self._labels = labels
+        self._dataset_name = dataset_name
+        self._report_version = report_version
+
         raw_data_path = resp.ctx_data.get("raw_data_path")
         if not raw_data_path:
             resp.success = False
@@ -127,7 +62,7 @@ class DataAnalysis(WfTask):
         frames: dict[str, pd.DataFrame] = {}
         split_stats: dict[str, dict] = {}
 
-        for split_name, filename in SPLITS.items():
+        for split_name, filename in splits.items():
             filepath = data_dir / filename
             if not filepath.exists():
                 log.debug("Skipping %s — file not found: %s", split_name, filepath)
@@ -141,13 +76,14 @@ class DataAnalysis(WfTask):
         insights = self._generate_insights(frames, split_stats)
         recommendations = self._generate_recommendations(frames, split_stats)
         cross_split = self._cross_split_analysis(frames)
-
         analyst_thinking = self._analyst_thinking(frames, split_stats)
 
         report = {
-            "report_version": REPORT_VERSION,
+            "dataset_name": dataset_name,
+            "dataset_subtitle": get_cfg(cfg, "dataset.subtitle", ""),
+            "report_version": report_version,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "column_classification": COLUMN_CLASSIFICATION,
+            "column_classification": column_classification,
             "column_classification_stats": col_class_stats,
             "splits": split_stats,
             "cross_split_analysis": cross_split,
@@ -156,52 +92,54 @@ class DataAnalysis(WfTask):
             "analyst_thinking": analyst_thinking,
         }
 
-        REPORT_DIR.mkdir(parents=True, exist_ok=True)
-        JSON_FILE.write_text(json.dumps(report, indent=2, default=str))
-        log.debug("JSON report saved to %s", JSON_FILE)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        json_file = report_dir / f"data_analysis_report_{report_version}.json"
+        html_file = report_dir / f"data_analysis_report_{report_version}.html"
+        md_file = report_dir / f"data_analysis_report_{report_version}.md"
+
+        json_file.write_text(json.dumps(report, indent=2, default=str))
+        log.debug("JSON report saved to %s", json_file)
 
         html = self._render_html(report, frames)
-        HTML_FILE.write_text(html)
-        log.debug("HTML report saved to %s", HTML_FILE)
+        html_file.write_text(html)
+        log.debug("HTML report saved to %s", html_file)
 
         md = self._render_markdown(report)
-        MD_FILE = REPORT_DIR / f"data_analysis_report_{REPORT_VERSION}.md"
-        MD_FILE.write_text(md)
-        log.debug("Markdown report saved to %s", MD_FILE)
+        md_file.write_text(md)
+        log.debug("Markdown report saved to %s", md_file)
 
-        repo_root = Path(__file__).resolve()
-        for parent in repo_root.parents:
-            if (parent / ".git").exists():
-                repo_root = parent
-                break
-        repo_html = repo_root / "data_analysis_report.html"
-        repo_html.write_text(html)
-        repo_md = repo_root / "data_analysis_report.md"
-        repo_md.write_text(md)
-        log.debug("Latest HTML + MD reports copied to repo root: %s", repo_root)
+        if get_cfg(cfg, "report.copy_to_repo_root", False):
+            repo_root = Path(__file__).resolve()
+            for parent in repo_root.parents:
+                if (parent / ".git").exists():
+                    repo_root = parent
+                    break
+            (repo_root / "data_analysis_report.html").write_text(html)
+            (repo_root / "data_analysis_report.md").write_text(md)
+            log.debug("Latest HTML + MD reports copied to repo root: %s", repo_root)
 
-        resp.message = f"Data analysis {REPORT_VERSION} complete — reports at {REPORT_DIR}"
-        resp.ctx_data["analysis_report_path"] = str(JSON_FILE)
-        resp.ctx_data["analysis_html_path"] = str(HTML_FILE)
+        resp.message = f"Data analysis {report_version} complete — reports at {report_dir}"
+        resp.ctx_data["analysis_report_path"] = str(json_file)
+        resp.ctx_data["analysis_html_path"] = str(html_file)
         resp.ctx_data["analysis_report"] = report
 
-        resp.ctx_data["splits_config"] = dict(SPLITS)
+        resp.ctx_data["splits_config"] = dict(splits)
         resp.ctx_data["raw_frames"] = frames
-        resp.ctx_data["column_classification"] = COLUMN_CLASSIFICATION
-        resp.ctx_data["drop_columns"] = list(COMPLEX_DROP)
-        resp.ctx_data["parse_then_drop_columns"] = list(PARSE_THEN_DROP)
-        resp.ctx_data["label_columns"] = list(LABEL_COLS)
-        resp.ctx_data["target_col"] = LABEL_COLS[0]
-        resp.ctx_data["aux_col"] = LABEL_COLS[1]
-        resp.ctx_data["true_numeric_columns"] = list(TRUE_NUMERIC)
-        resp.ctx_data["categorical_id_columns"] = list(CATEGORICAL_IDS)
-        resp.ctx_data["string_categorical_columns"] = list(STRING_CATEGORICAL)
-        resp.ctx_data["all_categorical_columns"] = list(STRING_CATEGORICAL) + list(CATEGORICAL_IDS)
+        resp.ctx_data["column_classification"] = column_classification
+        resp.ctx_data["drop_columns"] = list(complex_drop)
+        resp.ctx_data["parse_then_drop_columns"] = list(parse_then_drop)
+        resp.ctx_data["label_columns"] = list(labels)
+        resp.ctx_data["target_col"] = labels[0]
+        resp.ctx_data["aux_col"] = labels[1] if len(labels) > 1 else ""
+        resp.ctx_data["true_numeric_columns"] = list(true_numeric)
+        resp.ctx_data["categorical_id_columns"] = list(categorical_ids)
+        resp.ctx_data["string_categorical_columns"] = list(string_categorical)
+        resp.ctx_data["all_categorical_columns"] = list(string_categorical) + list(categorical_ids)
 
         log.debug("Published to ctx_data: splits_config=%s, drop=%s, labels=%s, "
                   "numeric=%s, cat_id=%s, string_cat=%s",
-                  list(SPLITS.keys()), COMPLEX_DROP, LABEL_COLS,
-                  TRUE_NUMERIC, CATEGORICAL_IDS, STRING_CATEGORICAL)
+                  list(splits.keys()), complex_drop, labels,
+                  true_numeric, categorical_ids, string_categorical)
         return resp
 
     # ------------------------------------------------------------------
@@ -216,7 +154,7 @@ class DataAnalysis(WfTask):
         train = frames["training"]
         result = {}
 
-        for col in CATEGORICAL_IDS:
+        for col in self._categorical_ids:
             if col not in train.columns:
                 continue
             unique = train[col].nunique()
@@ -286,12 +224,12 @@ class DataAnalysis(WfTask):
             },
             "true_numeric_stats": {
                 col: self._numeric_col_stats(df[col])
-                for col in TRUE_NUMERIC
+                for col in self._true_numeric
                 if col in df.columns
             },
             "categorical_id_stats": {
                 col: self._id_col_stats(df[col])
-                for col in CATEGORICAL_IDS
+                for col in self._categorical_ids
                 if col in df.columns
             },
             "string_categorical_stats": {
@@ -356,7 +294,7 @@ class DataAnalysis(WfTask):
 
         train = frames["training"]
 
-        all_cat_cols = STRING_CATEGORICAL + CATEGORICAL_IDS
+        all_cat_cols = self._string_categorical + self._categorical_ids
         vocab_overlap = {}
         for col in all_cat_cols:
             if col not in train.columns:
@@ -374,7 +312,7 @@ class DataAnalysis(WfTask):
         result["category_unseen_in_training"] = vocab_overlap
 
         drift = {}
-        for col in TRUE_NUMERIC:
+        for col in self._true_numeric:
             if col not in train.columns:
                 continue
             train_mean = float(train[col].mean())
@@ -551,12 +489,13 @@ class DataAnalysis(WfTask):
             train = frames["training"]
             test = frames["testing"]
             drifted = []
-            for col in TRUE_NUMERIC:
+            drift_threshold = get_cfg(self._cfg, "analysis.drift_threshold", 2.0)
+            for col in self._true_numeric:
                 if col not in train.columns:
                     continue
                 t_std = float(train[col].std()) or 1.0
                 z = abs(float(test[col].mean()) - float(train[col].mean())) / t_std
-                if z > 2.0:
+                if z > drift_threshold:
                     drifted.append((col, round(z, 2)))
             if drifted:
                 cols_str = ", ".join(f"{c} (z={z})" for c, z in drifted)
@@ -573,7 +512,7 @@ class DataAnalysis(WfTask):
 
         # --- unseen categories (strings + IDs) ---
         if "training" in frames:
-            for col in STRING_CATEGORICAL + CATEGORICAL_IDS:
+            for col in self._string_categorical + self._categorical_ids:
                 if col not in frames["training"].columns:
                     continue
                 train_vals = set(frames["training"][col].dropna().astype(str).unique())
@@ -710,6 +649,7 @@ class DataAnalysis(WfTask):
         attack_pct = round(test_attack / test_total * 100, 1) if test_total else 0
 
         return {
+            "_dataset_name": self._dataset_name,
             "the_core_problem": {
                 "title": "Why Can't We Use a Normal Classifier?",
                 "summary": (
@@ -1123,9 +1063,12 @@ class DataAnalysis(WfTask):
         lines: list[str] = []
         a = lines.append
 
-        a(f"# BETH Dataset — Cybersecurity Data Analysis Report")
+        ds_name = report.get("dataset_name", "Dataset")
+        version = report.get("report_version", "")
+
+        a(f"# {ds_name} — Data Analysis Report")
         a(f"")
-        a(f"**Version:** {REPORT_VERSION} | "
+        a(f"**Version:** {version} | "
           f"**Generated:** {report.get('generated_at', 'N/A')} | "
           f"**Splits:** {len(splits)}")
         a("")
@@ -1249,7 +1192,7 @@ class DataAnalysis(WfTask):
             a("")
             a(f"{cardinality.get('analogy', '')}")
             a("")
-            a(f"### In Our BETH Dataset")
+            a(f"### In Our {ds_name}")
             a("")
             a(f"{cardinality.get('in_our_data', '')}")
             a("")
@@ -1346,7 +1289,7 @@ class DataAnalysis(WfTask):
             a("")
 
         a("---")
-        a(f"*BETH Dataset Analysis {REPORT_VERSION} | Cyber Attack Detection Pipeline | "
+        a(f"*{ds_name} Analysis {version} | "
           f"Generated by data_analysis task*")
 
         return "\n".join(lines)
@@ -1516,7 +1459,7 @@ class DataAnalysis(WfTask):
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BETH Dataset — Cybersecurity Data Analysis Report {REPORT_VERSION}</title>
+<title>{report.get('dataset_name', 'Dataset')} — Data Analysis Report {report.get('report_version', '')}</title>
 <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
                          sans-serif; max-width: 1200px; margin: 0 auto;
@@ -1583,10 +1526,10 @@ class DataAnalysis(WfTask):
 <body>
 
 <div class="banner">
-    <h1>BETH Dataset — Cybersecurity Data Analysis Report</h1>
-    <p>Version: {REPORT_VERSION} &nbsp;|&nbsp;
+    <h1>{report.get('dataset_name', 'Dataset')} — Data Analysis Report</h1>
+    <p>Version: {report.get('report_version', '')} &nbsp;|&nbsp;
        Generated: {report.get('generated_at', 'N/A')} &nbsp;|&nbsp;
-       Biased Evaluation of Traces from Honeypots</p>
+       {report.get('dataset_subtitle', '')}</p>
 </div>
 
 <div class="summary-grid">
@@ -1675,8 +1618,7 @@ class DataAnalysis(WfTask):
 
 <footer style="margin-top:40px;padding-top:16px;border-top:1px solid #ddd;
                color:#999;font-size:0.85em">
-    BETH Dataset Analysis {REPORT_VERSION} &nbsp;|&nbsp;
-    Cyber Attack Detection Pipeline &nbsp;|&nbsp;
+    {report.get('dataset_name', 'Dataset')} Analysis {report.get('report_version', '')} &nbsp;|&nbsp;
     Report generated programmatically by the data_analysis task
 </footer>
 
@@ -1692,6 +1634,7 @@ class DataAnalysis(WfTask):
     def _render_educational_html(thinking: dict) -> str:
         core = thinking.get("the_core_problem", {})
         approaches = thinking.get("anomaly_detection_approaches", {})
+        ds_name = thinking.get("_dataset_name", "Dataset")
         autoenc = thinking.get("autoencoder_explained", {})
         cardinality = thinking.get("cardinality_explained", {})
         metrics = thinking.get("evaluation_metrics_explained", {})
@@ -1788,7 +1731,7 @@ class DataAnalysis(WfTask):
     <h2>{cardinality.get('title', '')}</h2>
     <h3>The Analogy</h3>
     <div class="analogy-box">{cardinality.get('analogy', '')}</div>
-    <h3>In Our BETH Dataset</h3>
+    <h3>In Our {ds_name}</h3>
     <div class="technical-box">{cardinality.get('in_our_data', '')}</div>
 </div>
 
