@@ -10,7 +10,7 @@ log = get_logger(__name__)
 TASKS: list[str] = [
     "data_analysis",
     "cleaning",
-    # "feature_engineering",
+    "feature_engineering",
     # "encoding",
     # "scaling",
 ]
