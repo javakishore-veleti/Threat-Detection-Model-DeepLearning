@@ -155,7 +155,23 @@ class DataAnalysis(WfTask):
         resp.ctx_data["analysis_report_path"] = str(JSON_FILE)
         resp.ctx_data["analysis_html_path"] = str(HTML_FILE)
         resp.ctx_data["analysis_report"] = report
+
+        resp.ctx_data["splits_config"] = dict(SPLITS)
+        resp.ctx_data["raw_frames"] = frames
         resp.ctx_data["column_classification"] = COLUMN_CLASSIFICATION
+        resp.ctx_data["drop_columns"] = list(COMPLEX_DROP)
+        resp.ctx_data["label_columns"] = list(LABEL_COLS)
+        resp.ctx_data["target_col"] = LABEL_COLS[0]
+        resp.ctx_data["aux_col"] = LABEL_COLS[1]
+        resp.ctx_data["true_numeric_columns"] = list(TRUE_NUMERIC)
+        resp.ctx_data["categorical_id_columns"] = list(CATEGORICAL_IDS)
+        resp.ctx_data["string_categorical_columns"] = list(STRING_CATEGORICAL)
+        resp.ctx_data["all_categorical_columns"] = list(STRING_CATEGORICAL) + list(CATEGORICAL_IDS)
+
+        log.debug("Published to ctx_data: splits_config=%s, drop=%s, labels=%s, "
+                  "numeric=%s, cat_id=%s, string_cat=%s",
+                  list(SPLITS.keys()), COMPLEX_DROP, LABEL_COLS,
+                  TRUE_NUMERIC, CATEGORICAL_IDS, STRING_CATEGORICAL)
         return resp
 
     # ------------------------------------------------------------------

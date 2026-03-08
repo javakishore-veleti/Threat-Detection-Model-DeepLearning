@@ -42,11 +42,11 @@
 - Educational deep-dive: autoencoder explanation, cardinality, evaluation metrics, industry approaches
 - Reports at `~/python_venvs/datasets/kaggle/beth-dataset/reports/`
 
-### Phase 3: Data Preprocessing — IN PROGRESS (4 tasks remaining)
+### Phase 3: Data Preprocessing — IN PROGRESS (3 tasks remaining)
 
 | # | Step | Status | File |
 |---|---|---|---|
-| 3 | Cleaning | TODO | `preprocessing/tasks/cleaning.py` |
+| 3 | Cleaning | DONE | `preprocessing/tasks/cleaning.py` |
 | 4 | Feature Engineering | TODO | `preprocessing/tasks/feature_engineering.py` |
 | 5 | Encoding | TODO | `preprocessing/tasks/encoding.py` |
 | 6 | Scaling | TODO | `preprocessing/tasks/scaling.py` |

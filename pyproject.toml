@@ -5,9 +5,13 @@ description = "Detecting Cyber Attacks in network traffic using PyTorch"
 requires-python = ">=3.11"
 dependencies = [
     "pandas",
+    "numpy",
     "torch",
     "torchvision",
     "torchaudio",
+    "scikit-learn",
     "kaggle",
     "requests",
+    "pyyaml",
+    "tqdm",
 ]
