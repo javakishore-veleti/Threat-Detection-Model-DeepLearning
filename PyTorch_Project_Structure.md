@@ -9,53 +9,49 @@ Threat-Detection-Model-DeepLearning/
 ├── pyproject.toml                # Python deps managed via uv
 ├── README.md
 │
+├── src/
+│   ├── main.py                   # Facade — ~10 lines, zero pipeline imports
+│   │
+│   ├── core/                     # Shared framework (like Django internals)
+│   │   ├── base.py               # BaseSubWorkflow ABC
+│   │   ├── config.py             # Config loading workflow (YAML -> validated dict)
+│   │   ├── loader.py             # Dynamic pipeline discovery via importlib
+│   │   ├── registry.py           # Pipeline registry (auto-populated by apps)
+│   │   ├── runner.py             # PipelineRunner — executes sub-workflows in order
+│   │   ├── logger.py             # Structured logging setup
+│   │   └── seed.py               # Reproducibility
+│   │
+│   └── pipelines/                # Each pipeline is a Django-like "app"
+│       └── cyber_attack_detection/
+│           ├── app.py            # AppConfig: name, description, sub_workflow list
+│           ├── main.py           # Pipeline orchestrator — called by src/main.py
+│           ├── sub_workflows/
+│           │   ├── download.py
+│           │   ├── preprocessing.py
+│           │   ├── model_setup.py
+│           │   └── train_eval.py
+│           ├── preprocessing/
+│           │   ├── cleaning.py
+│           │   ├── feature_engineering.py
+│           │   ├── encoding.py
+│           │   └── scaling.py
+│           ├── models/
+│           │   ├── baseline.py
+│           │   └── components.py
+│           ├── training/
+│           │   ├── trainer.py
+│           │   ├── losses.py
+│           │   └── metrics.py
+│           └── inference/
+│               └── predict.py
+│
 ├── configs/
-│   └── cyber_attack_detection/   # Per-pipeline config (one folder per pipeline)
+│   └── cyber_attack_detection/
 │       ├── default.yaml
 │       └── experiment/
 │           └── baseline.yaml
 │
-├── src/
-│   └── threat_detection/
-│       │
-│       ├── sub_workflows/        # Reusable sub-workflow base + implementations
-│       │   ├── base.py           # BaseSubWorkflow ABC
-│       │   ├── download.py       # Sub-workflow: fetch data from source
-│       │   ├── preprocessing.py  # Sub-workflow: clean -> features -> encode -> scale
-│       │   ├── model_setup.py    # Sub-workflow: instantiate model, optimizer, scheduler
-│       │   └── train_eval.py     # Sub-workflow: train + validate per epoch, then test
-│       │
-│       ├── preprocessing/        # Preprocessing stage implementations
-│       │   ├── cleaning.py
-│       │   ├── feature_engineering.py
-│       │   ├── encoding.py
-│       │   └── scaling.py
-│       │
-│       ├── models/               # Model definitions only — no training logic
-│       │   ├── baseline.py
-│       │   └── components.py
-│       │
-│       ├── training/             # Training and evaluation loops
-│       │   ├── trainer.py        # Epoch loop with interleaved train/val + checkpoint
-│       │   ├── losses.py
-│       │   └── metrics.py
-│       │
-│       ├── inference/
-│       │   └── predict.py
-│       │
-│       ├── pipelines/            # Each pipeline composes sub-workflows
-│       │   ├── registry.py       # Register and discover pipelines by name
-│       │   └── cyber_attack_detection.py
-│       │
-│       └── utils/
-│           ├── logger.py
-│           ├── seed.py
-│           └── config.py
-│
 ├── scripts/
-│   ├── run_pipeline.py           # python scripts/run_pipeline.py --pipeline cyber_attack_detection
-│   └── run_sub_workflow.py       # python scripts/run_sub_workflow.py --pipeline cyber_attack_detection --step preprocessing
-│
 ├── notebooks/
 ├── tests/
 │
@@ -74,58 +70,111 @@ Threat-Detection-Model-DeepLearning/
 
 ---
 
-## Multi-Pipeline Architecture
+## Architecture: Django-Like App Pattern
 
-The project is a **registry of pipelines**, each composed of **sub-workflows**. The first pipeline is `cyber_attack_detection`. Future pipelines plug into the same structure.
+Each pipeline is a self-contained "app" (like a Django app). Two-level facade: `src/main.py` handles common setup, then delegates to the pipeline's own `main.py` which orchestrates its sub-workflows.
 
 ```mermaid
 flowchart TD
-    subgraph registry [Pipeline Registry]
-        CAD["cyber_attack_detection"]
-        FUTURE["future_pipeline_2..."]
+    NPM["npm run cyber-attack-detection"] --> MAIN["src/main.py (top facade)"]
+    MAIN --> CW["core/config.py"]
+    CW -->|"loaded config"| DISC["core/loader.py"]
+    DISC -->|"importlib"| PMAIN["pipeline/main.py (orchestrator)"]
+    PMAIN --> SW1["download"]
+    PMAIN --> SW2["preprocessing"]
+    PMAIN --> SW3["model_setup"]
+    PMAIN --> SW4["train_eval"]
+
+    subgraph core [src/core/]
+        CW["config workflow"]
+        DISC["pipeline loader"]
     end
 
-    CAD --> DL
-    CAD --> PP
-    CAD --> MS
-    CAD --> TE
-
-    subgraph subworkflows [Sub-Workflows]
-        DL["1. Download"]
-        PP["2. Preprocessing"]
-        MS["3. Model Setup"]
-        TE["4. Train / Validate / Test"]
+    subgraph app [src/pipelines/cyber_attack_detection/]
+        PMAIN["main.py (orchestrator)"]
+        SW1
+        SW2
+        SW3
+        SW4
     end
-
-    DL -->|"data/raw/"| PP
-    PP -->|"data/processed/"| MS
-    MS -->|"model + config"| TE
-    TE -->|"outputs/checkpoints/"| DONE[Results]
 ```
 
-### Per-pipeline isolation
+### `src/main.py` — top-level facade
 
-Each pipeline gets its own subdirectories so they never collide:
+The entire file is ~10 lines. Handles only common concerns (parse args, load config, discover pipeline), then hands off to the pipeline's own orchestrator. No pipeline-specific imports. No if/elif chains.
 
+```python
+import sys
+from core.config import load_config
+from core.loader import discover_and_run_pipeline
+
+def main():
+    pipeline_name, args = parse_args(sys.argv)
+    config = load_config(pipeline_name, args)
+    discover_and_run_pipeline(pipeline_name, config, args)
+
+if __name__ == "__main__":
+    main()
 ```
-data/raw/cyber_attack_detection/
-data/processed/cyber_attack_detection/
-outputs/checkpoints/cyber_attack_detection/
-outputs/logs/cyber_attack_detection/
+
+### `pipelines/cyber_attack_detection/main.py` — pipeline orchestrator
+
+Called by `src/main.py` via `core/loader.py`. Handles pipeline-specific setup: reads `app.py` config, resolves sub-workflow classes, runs them in order, manages the shared context dict. This is the pipeline's brain.
+
+```python
+def run(config, args):
+    """Called by core/loader.py. Orchestrates this pipeline's sub-workflows."""
+    from .app import pipeline_config
+    # resolve dotted-string sub-workflows, build context, run in order
+    ...
 ```
 
-### Adding a future pipeline
+### `core/loader.py` — dynamic pipeline discovery
 
-1. Create `configs/<new_pipeline_name>/default.yaml`
-2. Create `pipelines/<new_pipeline_name>.py` composing its sub-workflows
-3. Reuse existing sub-workflows or create new ones in `sub_workflows/`
-4. Run: `npm run pipeline -- --pipeline <new_pipeline_name>`
+Uses `importlib` to find and load pipelines at runtime. No manual registration — just drop a folder in `pipelines/` with a `main.py` and `app.py`.
+
+```python
+import importlib
+
+def discover_and_run_pipeline(name, config, args):
+    module = importlib.import_module(f"pipelines.{name}.main")
+    module.run(config, args)
+```
+
+### `core/config.py` — config loading as a workflow
+
+Config loading is its own step so `main.py` stays clean:
+
+1. Find config file: `configs/{pipeline_name}/default.yaml`
+2. Load and parse YAML
+3. Apply experiment overrides if `--experiment baseline` passed
+4. Apply CLI overrides (e.g., `--training.lr 0.01`)
+5. Validate required keys
+6. Set up logging + seed from config
+7. Return the final config dict
+
+### Each pipeline's `app.py` — like Django's AppConfig
+
+```python
+pipeline_config = {
+    "name": "cyber_attack_detection",
+    "description": "Detect cyber attacks in network traffic using PyTorch",
+    "sub_workflows": [
+        "pipelines.cyber_attack_detection.sub_workflows.download.DownloadWorkflow",
+        "pipelines.cyber_attack_detection.sub_workflows.preprocessing.PreprocessingWorkflow",
+        "pipelines.cyber_attack_detection.sub_workflows.model_setup.ModelSetupWorkflow",
+        "pipelines.cyber_attack_detection.sub_workflows.train_eval.TrainEvalWorkflow",
+    ],
+}
+```
+
+Sub-workflows are **dotted strings** resolved by the pipeline's `main.py` via importlib at runtime. Zero imports in `app.py`.
 
 ---
 
 ## Sub-Workflow Design
 
-Each sub-workflow inherits from `BaseSubWorkflow` with three methods:
+Each sub-workflow inherits from `core/base.py` with three methods:
 
 | Method | Purpose |
 |---|---|
@@ -137,15 +186,13 @@ A shared `context` dict flows between sub-workflows. Each reads what it needs an
 
 ### The four sub-workflows for cyber_attack_detection
 
-**1. Download** — fetch dataset from Kaggle (configurable source/dataset in YAML). Adds `context["raw_data_path"]`.
+**1. Download** — fetch dataset from configured source (Kaggle). Adds `context["raw_data_path"]`.
 
-**2. Preprocessing** — chains cleaning -> feature engineering -> encoding -> scaling using the `preprocessing/` stage modules. Saves encoders/scalers as artifacts for inference reuse.
+**2. Preprocessing** — chains cleaning -> feature engineering -> encoding -> scaling. Saves encoders/scalers as artifacts.
 
-**3. Model Setup** — instantiate model, optimizer, scheduler from config. If resuming from a checkpoint, restores all states and the epoch counter.
+**3. Model Setup** — instantiate model, optimizer, scheduler from config. Restores from checkpoint if resuming.
 
-**4. Train / Validate / Test** — one sub-workflow because training and validation are interleaved per epoch:
-  - Each epoch: train -> validate -> checkpoint -> early stop check
-  - After all epochs: test with best model
+**4. Train / Validate / Test** — interleaved per epoch: train -> validate -> checkpoint -> early stop. Final test with best model.
 
 ---
 
@@ -158,13 +205,13 @@ A shared `context` dict flows between sub-workflows. Each reads what it needs an
 | Encoding | `encoding.py` | Label-encode target, one-hot/ordinal for categoricals |
 | Scaling | `scaling.py` | StandardScaler/MinMaxScaler, fit on train only |
 
-Encoders and scalers are saved to `data/processed/<pipeline>/artifacts/` so inference uses the exact same transformations.
+Encoders and scalers are saved to `data/processed/<pipeline>/artifacts/` for inference reuse.
 
 ---
 
 ## Config-Driven Design
 
-All hyperparameters live in YAML under `configs/<pipeline_name>/`. Code never hardcodes values.
+All hyperparameters live in YAML under `configs/<pipeline_name>/`.
 
 ### Example: `configs/cyber_attack_detection/default.yaml`
 
@@ -226,57 +273,42 @@ seed: 42
 ### Full pipeline
 
 ```bash
-npm run pipeline
+npm run cyber-attack-detection
 ```
-
-Runs all four sub-workflows: download -> preprocessing -> model_setup -> train_eval.
 
 ### Restart from a specific sub-workflow
 
 ```bash
-npm run pipeline:from -- preprocessing
-npm run pipeline:from -- model_setup
-npm run pipeline:from -- train_eval
+npm run cyber-attack-detection:from -- preprocessing
+npm run cyber-attack-detection:from -- model_setup
+npm run cyber-attack-detection:from -- train_eval
 ```
 
-Skips earlier sub-workflows. Each sub-workflow also checks if its output already exists.
-
-### Run a single sub-workflow
+### Resume interrupted training from checkpoint
 
 ```bash
-npm run sub-workflow -- download
-npm run sub-workflow -- preprocessing
+npm run cyber-attack-detection:resume
 ```
 
-### Resume interrupted training (checkpoint)
-
-```bash
-npm run train:resume
-```
-
-Loads `outputs/checkpoints/cyber_attack_detection/last.pt` containing model weights, optimizer state, epoch number, and best metric. Picks up exactly where it stopped.
+Loads `outputs/checkpoints/cyber_attack_detection/last.pt` and picks up at the exact epoch where it stopped.
 
 | Checkpoint file | Saved when | Purpose |
 |---|---|---|
 | `last.pt` | End of every epoch | Resume interrupted training |
 | `best.pt` | Validation metric improves | Inference and evaluation |
 
-### How it fits together
+### Adding a new pipeline
 
-```mermaid
-flowchart TD
-    A["npm run pipeline"] --> B{Sub-workflow outputs exist?}
-    B -->|Yes| C[Skip to next sub-workflow]
-    B -->|No| D[Run sub-workflow]
-    D --> E{Train/eval sub-workflow?}
-    E -->|Yes| F{Checkpoint exists?}
-    F -->|Yes| G["Resume from last.pt"]
-    F -->|No| H[Start from epoch 0]
-    E -->|No| I[Run normally]
-    G --> J["Save checkpoint every epoch"]
-    H --> J
-    J --> K["best.pt + last.pt saved"]
+1. Create `src/pipelines/<name>/app.py` with a `pipeline_config` dict
+2. Create sub-folders: `sub_workflows/`, `preprocessing/`, `models/`, `training/`, `inference/`
+3. Create `configs/<name>/default.yaml`
+4. Add to `package.json`:
+
+```json
+"<name>": "conda run ... python src/main.py <name>"
 ```
+
+No changes to `main.py` or `core/` needed.
 
 ---
 
@@ -292,14 +324,13 @@ flowchart TD
 
 After `setup-venv-daily`, activate with: `pytorch_project_tdm`
 
-### Pipeline
+### Pipelines
 
 | Command | What it does |
 |---|---|
-| `npm run pipeline` | Full end-to-end (default: cyber_attack_detection) |
-| `npm run pipeline:from -- <step>` | Restart from a sub-workflow (download, preprocessing, model_setup, train_eval) |
-| `npm run sub-workflow -- <step>` | Run a single sub-workflow |
-| `npm run train:resume` | Resume training from last checkpoint |
+| `npm run cyber-attack-detection` | Full pipeline: download -> preprocess -> model_setup -> train_eval |
+| `npm run cyber-attack-detection:from -- <step>` | Restart from a sub-workflow |
+| `npm run cyber-attack-detection:resume` | Resume training from last checkpoint |
 
 ---
 
