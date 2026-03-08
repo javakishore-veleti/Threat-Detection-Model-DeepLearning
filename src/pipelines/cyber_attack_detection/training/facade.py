@@ -7,7 +7,9 @@ from core.logger import get_logger
 
 log = get_logger(__name__)
 
-TASKS: list[str] = []
+TASKS: list[str] = [
+    "trainer",
+]
 
 
 class TrainingFacade(SubWf):

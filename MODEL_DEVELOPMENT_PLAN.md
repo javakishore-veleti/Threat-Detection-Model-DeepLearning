@@ -13,7 +13,7 @@
 | **Download** | DONE | `kaggle_beth.py` — idempotent Kaggle download, reads dataset ID and paths from config |
 | **Preprocessing** | DONE (5 of 5) | `data_analysis.py` (v04 report, config-driven), `cleaning.py` (config-driven), `feature_engineering.py` (generic engine reads feature specs from YAML), `encoding.py` (LabelEncoder with UNKNOWN handling), `scaling.py` (StandardScaler on 3 true numeric, numpy float32 + .npy artifacts) |
 | **Models** | DONE | `autoencoder.py` — nn.Module (23→64→32→16→32→64→23, 8,295 params), config-driven architecture |
-| **Training** | Empty | Facade ready, `tasks/` empty |
+| **Training** | DONE | `trainer.py` — DataLoader, MSELoss, Adam, 50 epochs, checkpointing (best.pt/last.pt), resume support |
 | **Inference** | Empty | Facade ready, `tasks/` empty |
 
 ## Config-Driven Architecture
@@ -155,11 +155,11 @@ raw string column before encoding.
 - `nn.Sequential` for clean layer composition
 - Store model instance in `resp.ctx_data["model"]`
 
-### Phase 5: Training — TODO
+### Phase 5: Training — DONE
 
 | # | Step | Status | File |
 |---|---|---|---|
-| 8 | Training loop | TODO | `training/tasks/trainer.py` |
+| 8 | Training loop | DONE | `training/tasks/trainer.py` |
 
 - `DataLoader` with `batch_size=256`, `shuffle=True`
 - Loss: `nn.MSELoss()` (reconstruction error)

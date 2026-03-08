@@ -165,6 +165,15 @@ model:
   device: "auto"           # "auto" picks cuda > mps > cpu
 
 # ---------------------------------------------------------------------------
+# Training — hyperparameters for the autoencoder training loop
+# ---------------------------------------------------------------------------
+training:
+  lr: 0.001                # Adam learning rate
+  batch_size: 256          # rows per mini-batch
+  num_epochs: 50           # total training epochs
+  checkpoint_dir: "~/python_venvs/datasets/kaggle/beth-dataset/artifacts/checkpoints"
+
+# ---------------------------------------------------------------------------
 # Report settings
 # ---------------------------------------------------------------------------
 report:
