@@ -13,37 +13,49 @@ Threat-Detection-Model-DeepLearning/
 │   ├── main.py                   # Facade — ~10 lines, zero pipeline imports
 │   │
 │   ├── core/                     # Shared framework (like Django internals)
-│   │   ├── base.py               # BaseSubWorkflow ABC
+│   │   ├── common/
+│   │   │   └── wfs/
+│   │   │       ├── interfaces.py # MainWf, SubWf, WfTask ABCs
+│   │   │       └── dtos.py       # WfReq, WfResp dataclasses
 │   │   ├── config.py             # Config loading workflow (YAML -> validated dict)
 │   │   ├── loader.py             # Dynamic pipeline discovery via importlib
-│   │   ├── registry.py           # Pipeline registry (auto-populated by apps)
-│   │   ├── runner.py             # PipelineRunner — executes sub-workflows in order
 │   │   ├── logger.py             # Structured logging setup
 │   │   └── seed.py               # Reproducibility
 │   │
 │   └── pipelines/                # Each pipeline is a Django-like "app"
 │       └── cyber_attack_detection/
-│           ├── app.py            # AppConfig: name, description, sub_workflow list
-│           ├── main.py           # Pipeline orchestrator — called by src/main.py
-│           ├── sub_workflows/
-│           │   ├── download.py
-│           │   ├── preprocessing.py
-│           │   ├── model_setup.py
-│           │   └── train_eval.py
-│           ├── preprocessing/
-│           │   ├── cleaning.py
-│           │   ├── feature_engineering.py
-│           │   ├── encoding.py
-│           │   └── scaling.py
-│           ├── models/
-│           │   ├── baseline.py
-│           │   └── components.py
-│           ├── training/
-│           │   ├── trainer.py
-│           │   ├── losses.py
-│           │   └── metrics.py
-│           └── inference/
-│               └── predict.py
+│           ├── main.py           # CyberAttackDetection(MainWf) — pipeline orchestrator
+│           │
+│           ├── download/         # Sub-workflow 1: data acquisition
+│           │   ├── facade.py     # Sub-workflow facade — loads tasks dynamically
+│           │   └── tasks/
+│           │       └── ...       # Independent task files
+│           │
+│           ├── preprocessing/    # Sub-workflow 2: data preprocessing
+│           │   ├── facade.py     # Sub-workflow facade
+│           │   └── tasks/
+│           │       ├── cleaning.py
+│           │       ├── feature_engineering.py
+│           │       ├── encoding.py
+│           │       └── scaling.py
+│           │
+│           ├── models/           # Sub-workflow 3: model setup
+│           │   ├── facade.py     # Sub-workflow facade
+│           │   └── tasks/
+│           │       ├── baseline.py
+│           │       └── components.py
+│           │
+│           ├── training/         # Sub-workflow 4: train / validate / test
+│           │   ├── facade.py     # Sub-workflow facade
+│           │   └── tasks/
+│           │       ├── trainer.py
+│           │       ├── losses.py
+│           │       └── metrics.py
+│           │
+│           └── inference/        # Prediction / serving
+│               ├── facade.py     # Sub-workflow facade
+│               └── tasks/
+│                   └── predict.py
 │
 ├── configs/
 │   └── cyber_attack_detection/
@@ -70,129 +82,235 @@ Threat-Detection-Model-DeepLearning/
 
 ---
 
-## Architecture: Django-Like App Pattern
+## Architecture: Interface & DTO Pattern
 
-Each pipeline is a self-contained "app" (like a Django app). Two-level facade: `src/main.py` handles common setup, then delegates to the pipeline's own `main.py` which orchestrates its sub-workflows.
+Every component implements one of three Abstract Base Classes from `core/common/wfs/interfaces.py`, and all communication passes through two dataclass DTOs from `core/common/wfs/dtos.py`.
+
+### Class hierarchy
+
+```mermaid
+classDiagram
+    class WfReq {
+        +str pipeline
+        +str start_from
+        +str resume
+        +str config_path
+        +dict config
+        +dict ctx_data
+    }
+    class WfResp {
+        +bool success
+        +str message
+        +dict ctx_data
+    }
+    class MainWf {
+        <<interface>>
+        +execute(WfReq) WfResp
+    }
+    class SubWf {
+        <<interface>>
+        +execute(WfReq) WfResp
+    }
+    class WfTask {
+        <<interface>>
+        +execute(WfReq) WfResp
+    }
+
+    MainWf ..> WfReq
+    MainWf ..> WfResp
+    SubWf ..> WfReq
+    SubWf ..> WfResp
+    WfTask ..> WfReq
+    WfTask ..> WfResp
+
+    CyberAttackDetection --|> MainWf
+    PreprocessingFacade --|> SubWf
+    CleaningTask --|> WfTask
+```
+
+### Execution flow
 
 ```mermaid
 flowchart TD
-    NPM["npm run cyber-attack-detection"] --> MAIN["src/main.py (top facade)"]
-    MAIN --> CW["core/config.py"]
-    CW -->|"loaded config"| DISC["core/loader.py"]
-    DISC -->|"importlib"| PMAIN["pipeline/main.py (orchestrator)"]
-    PMAIN --> SW1["download"]
-    PMAIN --> SW2["preprocessing"]
-    PMAIN --> SW3["model_setup"]
-    PMAIN --> SW4["train_eval"]
+    NPM["npm run cyber-attack-detection"] --> MAIN["src/main.py"]
+    MAIN -->|"importlib + WfReq"| CAD["CyberAttackDetection.execute()"]
 
-    subgraph core [src/core/]
-        CW["config workflow"]
-        DISC["pipeline loader"]
+    subgraph pipeline [MainWf implementation]
+        CAD --> DL["download/facade.py (SubWf)"]
+        CAD --> PP["preprocessing/facade.py (SubWf)"]
+        CAD --> MD["models/facade.py (SubWf)"]
+        CAD --> TR["training/facade.py (SubWf)"]
+        CAD --> INF["inference/facade.py (SubWf)"]
     end
 
-    subgraph app [src/pipelines/cyber_attack_detection/]
-        PMAIN["main.py (orchestrator)"]
-        SW1
-        SW2
-        SW3
-        SW4
+    subgraph subwf [SubWf -> WfTask]
+        PP --> T1["tasks/cleaning.py (WfTask)"]
+        PP --> T2["tasks/feature_engineering.py (WfTask)"]
+        PP --> T3["tasks/encoding.py (WfTask)"]
+        PP --> T4["tasks/scaling.py (WfTask)"]
     end
+
+    MAIN -.->|"WfResp"| DONE[Done]
+```
+
+`WfReq` and `WfResp` are passed at every level. The `ctx_data` dict inside them carries intermediary state between sub-workflows and tasks.
+
+### `core/common/wfs/dtos.py` — data transfer objects
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class WfReq:
+    pipeline: str = ""
+    start_from: str | None = None
+    resume: str | None = None
+    config_path: str | None = None
+    config: dict = field(default_factory=dict)
+    ctx_data: dict = field(default_factory=dict)
+
+@dataclass
+class WfResp:
+    success: bool = True
+    message: str = ""
+    ctx_data: dict = field(default_factory=dict)
+```
+
+### `core/common/wfs/interfaces.py` — ABCs
+
+```python
+from abc import ABC, abstractmethod
+from core.common.wfs.dtos import WfReq, WfResp
+
+class MainWf(ABC):
+    @abstractmethod
+    def execute(self, req: WfReq) -> WfResp: ...
+
+class SubWf(ABC):
+    @abstractmethod
+    def execute(self, req: WfReq) -> WfResp: ...
+
+class WfTask(ABC):
+    @abstractmethod
+    def execute(self, req: WfReq) -> WfResp: ...
 ```
 
 ### `src/main.py` — top-level facade
 
-The entire file is ~10 lines. Handles only common concerns (parse args, load config, discover pipeline), then hands off to the pipeline's own orchestrator. No pipeline-specific imports. No if/elif chains.
+Constructs a `WfReq`, dynamically loads the pipeline's `MainWf` implementation, and calls `execute()`. No pipeline-specific imports, no if/elif chains.
 
 ```python
-import sys
-from core.config import load_config
-from core.loader import discover_and_run_pipeline
+from core.common.wfs.dtos import WfReq, WfResp
 
 def main():
-    pipeline_name, args = parse_args(sys.argv)
-    config = load_config(pipeline_name, args)
-    discover_and_run_pipeline(pipeline_name, config, args)
-
-if __name__ == "__main__":
-    main()
+    args = parse_args()
+    req = WfReq(
+        pipeline=args.pipeline,
+        start_from=args.start_from,
+        resume=args.resume,
+        config_path=args.config,
+    )
+    module = importlib.import_module(f"pipelines.{args.pipeline}.main")
+    pipeline_cls = getattr(module, "Pipeline")
+    resp: WfResp = pipeline_cls().execute(req)
 ```
 
-### `pipelines/cyber_attack_detection/main.py` — pipeline orchestrator
+### `pipelines/cyber_attack_detection/main.py` — implements MainWf
 
-Called by `src/main.py` via `core/loader.py`. Handles pipeline-specific setup: reads `app.py` config, resolves sub-workflow classes, runs them in order, manages the shared context dict. This is the pipeline's brain.
+The `CyberAttackDetection` class orchestrates sub-workflows in order, threading `ctx_data` through each step. A `Pipeline` alias at module level is used by `src/main.py` for dynamic loading.
 
 ```python
-def run(config, args):
-    """Called by core/loader.py. Orchestrates this pipeline's sub-workflows."""
-    from .app import pipeline_config
-    # resolve dotted-string sub-workflows, build context, run in order
-    ...
+from core.common.wfs.interfaces import MainWf
+from core.common.wfs.dtos import WfReq, WfResp
+
+class CyberAttackDetection(MainWf):
+    def execute(self, req: WfReq) -> WfResp:
+        steps = self._resolve_steps(req.start_from)
+        for step_name in steps:
+            module = importlib.import_module(
+                f"pipelines.cyber_attack_detection.{step_name}.facade"
+            )
+            resp = getattr(module, "Facade")().execute(req)
+            if not resp.success:
+                return resp
+            req.ctx_data.update(resp.ctx_data)
+        return WfResp(success=True, message="Pipeline completed", ctx_data=req.ctx_data)
+
+Pipeline = CyberAttackDetection
 ```
 
-### `core/loader.py` — dynamic pipeline discovery
-
-Uses `importlib` to find and load pipelines at runtime. No manual registration — just drop a folder in `pipelines/` with a `main.py` and `app.py`.
+### Each `facade.py` — implements SubWf
 
 ```python
-import importlib
+from core.common.wfs.interfaces import SubWf
+from core.common.wfs.dtos import WfReq, WfResp
 
-def discover_and_run_pipeline(name, config, args):
-    module = importlib.import_module(f"pipelines.{name}.main")
-    module.run(config, args)
+class PreprocessingFacade(SubWf):
+    def execute(self, req: WfReq) -> WfResp:
+        # dynamically load + cache tasks, run in order
+        ...
+
+Facade = PreprocessingFacade
 ```
 
-### `core/config.py` — config loading as a workflow
-
-Config loading is its own step so `main.py` stays clean:
-
-1. Find config file: `configs/{pipeline_name}/default.yaml`
-2. Load and parse YAML
-3. Apply experiment overrides if `--experiment baseline` passed
-4. Apply CLI overrides (e.g., `--training.lr 0.01`)
-5. Validate required keys
-6. Set up logging + seed from config
-7. Return the final config dict
-
-### Each pipeline's `app.py` — like Django's AppConfig
+### Each `tasks/*.py` — implements WfTask
 
 ```python
-pipeline_config = {
-    "name": "cyber_attack_detection",
-    "description": "Detect cyber attacks in network traffic using PyTorch",
-    "sub_workflows": [
-        "pipelines.cyber_attack_detection.sub_workflows.download.DownloadWorkflow",
-        "pipelines.cyber_attack_detection.sub_workflows.preprocessing.PreprocessingWorkflow",
-        "pipelines.cyber_attack_detection.sub_workflows.model_setup.ModelSetupWorkflow",
-        "pipelines.cyber_attack_detection.sub_workflows.train_eval.TrainEvalWorkflow",
-    ],
-}
-```
+from core.common.wfs.interfaces import WfTask
+from core.common.wfs.dtos import WfReq, WfResp
 
-Sub-workflows are **dotted strings** resolved by the pipeline's `main.py` via importlib at runtime. Zero imports in `app.py`.
+class CleaningTask(WfTask):
+    def execute(self, req: WfReq) -> WfResp:
+        # read req.ctx_data, do work, return WfResp with updated ctx_data
+        ...
+```
 
 ---
 
-## Sub-Workflow Design
+## Sub-Workflow Design: Facade + Tasks
 
-Each sub-workflow inherits from `core/base.py` with three methods:
+There is no separate `sub_workflows/` package. Each sub-module (download, preprocessing, models, training, inference) **is** a sub-workflow, with two layers:
 
-| Method | Purpose |
-|---|---|
-| `validate_inputs()` | Raise if required inputs are missing from config or context |
-| `should_skip()` | Return True if outputs already exist (idempotent) |
-| `run()` | Execute the sub-workflow, return updated context dict |
+```mermaid
+flowchart LR
+    PM["pipeline main.py"] --> F1["download/facade.py"]
+    PM --> F2["preprocessing/facade.py"]
+    PM --> F3["models/facade.py"]
+    PM --> F4["training/facade.py"]
 
-A shared `context` dict flows between sub-workflows. Each reads what it needs and adds its outputs.
+    F2 --> T1["tasks/cleaning.py"]
+    F2 --> T2["tasks/feature_engineering.py"]
+    F2 --> T3["tasks/encoding.py"]
+    F2 --> T4["tasks/scaling.py"]
+```
 
-### The four sub-workflows for cyber_attack_detection
+### `facade.py` — sub-workflow facade (implements SubWf)
 
-**1. Download** — fetch dataset from configured source (Kaggle). Adds `context["raw_data_path"]`.
+Each sub-module has a `facade.py` that:
 
-**2. Preprocessing** — chains cleaning -> feature engineering -> encoding -> scaling. Saves encoders/scalers as artifacts.
+- Implements the `SubWf` ABC
+- Dynamically loads `WfTask` classes from its `tasks/` folder via importlib
+- Caches loaded task objects to avoid re-importing
+- Runs tasks in the configured order, threading `WfReq`/`WfResp` through each
 
-**3. Model Setup** — instantiate model, optimizer, scheduler from config. Restores from checkpoint if resuming.
+### `tasks/` — independent task files (implement WfTask)
 
-**4. Train / Validate / Test** — interleaved per epoch: train -> validate -> checkpoint -> early stop. Final test with best model.
+Each file in `tasks/` is a standalone unit of work. Tasks:
+
+- Implement the `WfTask` ABC
+- Receive `WfReq`, do their job, return `WfResp` with updated `ctx_data`
+- Have no knowledge of other tasks or the facade
+- Can be tested independently
+
+### The five sub-modules for cyber_attack_detection
+
+| Sub-module | Facade loads | Purpose |
+|---|---|---|
+| `download/` | tasks for fetching data from Kaggle or other sources | Data acquisition |
+| `preprocessing/` | cleaning, feature_engineering, encoding, scaling | Raw -> processed |
+| `models/` | baseline model, components | Model instantiation + optimizer + scheduler |
+| `training/` | trainer, losses, metrics | Train/validate per epoch + checkpoint + test |
+| `inference/` | predict | Load best model, run on new data |
 
 ---
 
@@ -299,8 +417,8 @@ Loads `outputs/checkpoints/cyber_attack_detection/last.pt` and picks up at the e
 
 ### Adding a new pipeline
 
-1. Create `src/pipelines/<name>/app.py` with a `pipeline_config` dict
-2. Create sub-folders: `sub_workflows/`, `preprocessing/`, `models/`, `training/`, `inference/`
+1. Create `src/pipelines/<name>/main.py` with a class implementing `MainWf` and a `Pipeline` alias
+2. Create sub-folders with `facade.py` (implementing `SubWf`) and `tasks/` (implementing `WfTask`)
 3. Create `configs/<name>/default.yaml`
 4. Add to `package.json`:
 
@@ -308,7 +426,7 @@ Loads `outputs/checkpoints/cyber_attack_detection/last.pt` and picks up at the e
 "<name>": "conda run ... python src/main.py <name>"
 ```
 
-No changes to `main.py` or `core/` needed.
+No changes to `src/main.py` or `core/` needed.
 
 ---
 
