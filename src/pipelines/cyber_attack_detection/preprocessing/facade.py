@@ -8,6 +8,7 @@ from core.logger import get_logger
 log = get_logger(__name__)
 
 TASKS: list[str] = [
+    "data_analysis",
     # "cleaning",
     # "feature_engineering",
     # "encoding",
