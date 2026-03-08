@@ -60,17 +60,26 @@
 
 #### Step 4 — Feature Engineering
 
-Create domain-informed features that capture attack signals:
+Create domain-informed features that capture attack signals. Each feature is derived from
+cybersecurity domain knowledge (MITRE ATT&CK framework, HIDS best practices) and is
+consistent with our column classification — no arithmetic on categorical ID columns.
 
-| Feature | Formula | Why |
-|---|---|---|
-| `is_root` | `userId == 0` | Root processes have elevated privileges; attacks often run as root |
-| `return_negative` | `returnValue < 0` | Negative returns = errors; attacks may trigger more failures |
-| `return_category` | success (0) / error (<0) / info (>0) | Bins return values into meaningful groups |
-| `proc_parent_ratio` | `processId / (parentProcessId + 1)` | Unusual process trees reveal strange spawning patterns |
-| `args_per_event` | `argsNum / (eventId + 1)` | Unusual argument counts per event type |
+| Feature | Formula | Attack Signal | Industry Basis |
+|---|---|---|---|
+| `is_root` | `userId == 0` | Privilege escalation — attacks need root to install malware, steal data, persist | MITRE T1068; every HIDS (OSSEC, Wazuh, Falco) monitors root activity |
+| `return_negative` | `returnValue < 0` | Probing / brute force — attackers try things that fail (permission denied, file not found) | auditd rules, SIEM correlation for brute force detection |
+| `return_category` | 0→success, <0→error, >0→info | Semantic grouping — raw return values span a huge range; binning captures the meaningful signal | Standard feature engineering practice for domain-specific continuous variables |
+| `is_child_of_init` | `parentProcessId == 1` | Normal process tree — system services are children of init; attacker shells are spawned from compromised processes (web server, sshd) | Process tree analysis in Falco, Sysdig, CrowdStrike |
+| `is_orphan` | `parentProcessId == 0` | Process injection — orphan processes (parent died or was manipulated) can indicate injection attacks or process hiding | MITRE T1055 (Process Injection) |
+| `is_high_args` | `argsNum > training 95th percentile` | Unusually complex syscalls — buffer overflows and command injection stuff extra arguments | Anomaly-based IDS signature design |
+
+**Why not `processId / parentProcessId` or `argsNum / eventId`?** Our data analysis proved
+processId and eventId are categorical identifiers, not quantities. Dividing them produces
+meaningless numbers (PID 500 / PID 250 = 2 has no semantic meaning). The features above
+use only binary/categorical derivations that respect the column classification.
 
 - Apply identical transformations to train, val, and test
+- `is_high_args` threshold must be computed from **training data only** (no data leakage)
 
 #### Step 5 — Encoding
 

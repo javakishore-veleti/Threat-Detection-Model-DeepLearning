@@ -613,13 +613,17 @@ class DataAnalysis(WfTask):
                 "priority": 5,
                 "action": (
                     "Create: is_root (userId==0), return_negative (returnValue<0), "
-                    "return_category (success/error/info), args_per_event "
-                    "(argsNum/eventId bucketed)"
+                    "return_category (success/error/info), is_child_of_init "
+                    "(parentProcessId==1), is_orphan (parentProcessId==0), "
+                    "is_high_args (argsNum > training 95th percentile). "
+                    "No arithmetic on categorical ID columns."
                 ),
                 "reason": (
-                    "Domain-informed features that capture privilege escalation and "
-                    "error patterns — the two strongest attack signals in host-based "
-                    "intrusion detection."
+                    "Domain-informed features from MITRE ATT&CK: privilege escalation "
+                    "(T1068), failed syscall probing, process tree analysis (T1059), "
+                    "process injection (T1055), and anomalous syscall complexity. "
+                    "All features use binary/categorical derivations consistent with "
+                    "column classification — no arithmetic on categorical IDs."
                 ),
             },
             {

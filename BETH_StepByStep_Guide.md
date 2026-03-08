@@ -246,61 +246,150 @@ Imagine you're looking at a person's behavior over time. The raw data says "they
 
 Feature engineering means creating NEW columns from existing ones that help the model learn patterns better.
 
-### Step 5.2: Features to create
+### Step 5.2: How a cybersecurity analyst decides what features to create
 
-#### 5.2.1: processId-to-parentProcessId ratio
+This isn't guesswork. Each feature comes from known attack patterns documented in the
+**MITRE ATT&CK framework** (the industry encyclopedia of attack techniques) and
+real-world **Host-based Intrusion Detection System (HIDS)** practices used in
+tools like OSSEC, Wazuh, Falco, CrowdStrike, and Sysdig.
 
-```python
-df["proc_parent_ratio"] = df["processId"] / (df["parentProcessId"] + 1)
-```
+The golden rule: **only do arithmetic on columns where arithmetic makes sense.** We proved
+that processId, eventId, etc. are categorical IDs — dividing them produces nonsense.
+Every feature below uses only binary checks or operations on truly numeric columns.
 
-**Why:** A normal process has a parent process. The ratio between their IDs can reveal strange process trees (e.g., a process spawning from an unusual parent). The `+1` prevents division by zero.
+### Step 5.3: Features to create
 
-#### 5.2.2: Is the user root?
+#### 5.3.1: Is the user root?
 
 ```python
 df["is_root"] = (df["userId"] == 0).astype(int)
 ```
 
-**Why:** userId 0 = root on Linux. Root processes have elevated privileges. Attacks often run as root.
+**The attack pattern (MITRE T1068 — Privilege Escalation):** Almost every serious attack
+needs root access at some point. An attacker breaks in as a normal user (say, through a
+web server vulnerability), then "escalates" to root. Once root, they can install backdoors,
+steal credentials, and hide their tracks. Every security tool in the industry monitors
+root activity — it's security 101.
 
-#### 5.2.3: Event return value indicator
+**What the autoencoder learns:** The normal rate and timing of root processes. If attacks
+cause a sudden spike in root activity from unusual processes, reconstruction error goes up.
+
+#### 5.3.2: Is the return value negative (error)?
 
 ```python
 df["return_negative"] = (df["returnValue"] < 0).astype(int)
 ```
 
-**Why:** Negative return values usually mean an error or failure. Attacks may trigger more errors than normal operations.
+**The attack pattern (probing / brute force):** When an attacker is exploring a system,
+they try things that fail. They try to read `/etc/shadow` (permission denied = -13). They
+try to connect to internal services (connection refused = -111). They try to execute commands
+they can't (operation not permitted = -1). Each failure generates a negative return value.
 
-#### 5.2.4: Args count relative to event
+**Think of it this way:** A burglar rattling every door handle on a street. Most are
+locked. Normal residents rarely rattle locked doors — they have the key. A sudden burst
+of "locked door" signals = someone is probing.
+
+**Industry basis:** Failed syscall monitoring is a core feature of `auditd` (Linux audit
+daemon) and every SIEM correlation rule for brute force detection.
+
+#### 5.3.3: Return value category
 
 ```python
-df["args_per_event"] = df["argsNum"] / (df["eventId"] + 1)
+df["return_category"] = 0  # default: success
+df.loc[df["returnValue"] < 0, "return_category"] = 1   # error
+df.loc[df["returnValue"] > 0, "return_category"] = 2   # info
 ```
 
-**Why:** Different events have typical argument counts. An unusual ratio might indicate something abnormal.
+**Why bin instead of using the raw number?** The raw returnValue ranges from large
+negatives to large positives. The specific number (-13 vs -111) matters less than the
+category (both are errors). Binning compresses the signal into something the model
+can learn more easily.
 
-### Step 5.3: Important rule
+**The three groups:**
+- **0 (success):** The syscall worked as expected. Normal operations are mostly success.
+- **1 (error):** Something went wrong. Permission denied, file not found, connection refused.
+- **2 (info):** The syscall returned data. A file descriptor number, bytes read, etc.
 
-**Apply the exact same transformations to train, val, AND test.** Feature engineering must be identical across all splits. Write a helper function and call it for each:
+#### 5.3.4: Is this process a child of init?
 
 ```python
-def add_features(df: pd.DataFrame) -> pd.DataFrame:
+df["is_child_of_init"] = (df["parentProcessId"] == 1).astype(int)
+```
+
+**The attack pattern (MITRE T1059 — Command Scripting):** On Linux, PID 1 is
+`init` (or `systemd`) — the first process that starts everything else. Legitimate system
+services (sshd, nginx, cron) are children of init. But an attacker's reverse shell is
+spawned from the *compromised* process (e.g., a web server spawns bash). So an attacker's
+process has a parent like PID 4582 (nginx), not PID 1.
+
+**Why not divide processId by parentProcessId?** We proved these are categorical IDs.
+PID 500 / PID 250 = 2 is meaningless. But "is parent == 1?" is a clean binary check
+on the *identity* of the parent, not arithmetic on IDs.
+
+**Industry basis:** Process tree analysis is a core detection technique in CrowdStrike
+Falcon, Sysdig Secure, and Falco rules.
+
+#### 5.3.5: Is this an orphan process?
+
+```python
+df["is_orphan"] = (df["parentProcessId"] == 0).astype(int)
+```
+
+**The attack pattern (MITRE T1055 — Process Injection):** An orphan process is one whose
+parent has died or been manipulated. Attackers use process injection to run malicious code
+inside a legitimate process, then kill the original. The injected process becomes an orphan
+(parentProcessId = 0). Orphans in normal operations are rare.
+
+**Industry basis:** Orphan process detection is a standard HIDS rule in OSSEC and Wazuh.
+
+#### 5.3.6: Is the argument count unusually high?
+
+```python
+threshold = df["argsNum"].quantile(0.95)  # compute from TRAINING data only
+df["is_high_args"] = (df["argsNum"] > threshold).astype(int)
+```
+
+**The attack pattern (buffer overflow / command injection):** When an attacker exploits a
+buffer overflow or injects commands, they often stuff extra arguments into syscalls. Normal
+operations use a predictable number of arguments. An unusually high count is a red flag.
+
+**Why not `argsNum / eventId`?** We proved eventId is an enum (157 = prctl, 2 = open).
+Dividing by an enum code is meaningless. Instead, we use a statistical threshold: "is this
+call's argument count in the top 5% of what we've seen in training?"
+
+**Critical:** The 95th percentile threshold must be computed from **training data only**,
+then applied to val/test. This prevents data leakage.
+
+### Step 5.4: Important rules
+
+1. **Apply identical transformations to train, val, and test.** Write a helper function:
+
+```python
+def add_features(df: pd.DataFrame, args_threshold: float) -> pd.DataFrame:
     df = df.copy()
-    df["proc_parent_ratio"] = df["processId"] / (df["parentProcessId"] + 1)
     df["is_root"] = (df["userId"] == 0).astype(int)
     df["return_negative"] = (df["returnValue"] < 0).astype(int)
-    df["args_per_event"] = df["argsNum"] / (df["eventId"] + 1)
+    df["return_category"] = 0
+    df.loc[df["returnValue"] < 0, "return_category"] = 1
+    df.loc[df["returnValue"] > 0, "return_category"] = 2
+    df["is_child_of_init"] = (df["parentProcessId"] == 1).astype(int)
+    df["is_orphan"] = (df["parentProcessId"] == 0).astype(int)
+    df["is_high_args"] = (df["argsNum"] > args_threshold).astype(int)
     return df
 
-train_df = add_features(resp.ctx_data["train_df"])
-val_df = add_features(resp.ctx_data["val_df"])
-test_df = add_features(resp.ctx_data["test_df"])
+# Compute threshold from TRAINING only
+args_threshold = resp.ctx_data["train_df"]["argsNum"].quantile(0.95)
+
+train_df = add_features(resp.ctx_data["train_df"], args_threshold)
+val_df = add_features(resp.ctx_data["val_df"], args_threshold)
+test_df = add_features(resp.ctx_data["test_df"], args_threshold)
 ```
 
-### Step 5.4: Store back
+2. **Save `args_threshold` in ctx_data** — inference will need it for new data.
 
-Update `resp.ctx_data["train_df"]`, `resp.ctx_data["val_df"]`, `resp.ctx_data["test_df"]` with the new DataFrames.
+### Step 5.5: Store back
+
+Update `resp.ctx_data["train_df"]`, `resp.ctx_data["val_df"]`, `resp.ctx_data["test_df"]` with the new DataFrames. Also store `resp.ctx_data["args_threshold"]`.
 
 ---
 
