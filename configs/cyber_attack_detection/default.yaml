@@ -145,6 +145,14 @@ encoding:
   unknown_token: "UNKNOWN"
 
 # ---------------------------------------------------------------------------
+# Scaling — which columns to standardise (mean=0, std=1)
+# ---------------------------------------------------------------------------
+# Only truly numeric columns should be scaled.  Label-encoded categorical
+# columns and binary engineered features are left untouched.
+scaling:
+  scale_columns: "auto"   # "auto" = use columns.true_numeric.names from above
+
+# ---------------------------------------------------------------------------
 # Report settings
 # ---------------------------------------------------------------------------
 report:

@@ -12,7 +12,7 @@ TASKS: list[str] = [
     "cleaning",
     "feature_engineering",
     "encoding",
-    # "scaling",
+    "scaling",
 ]
 
 
