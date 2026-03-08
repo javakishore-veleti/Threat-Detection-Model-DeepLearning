@@ -164,6 +164,11 @@ class DataAnalysis(WfTask):
         HTML_FILE.write_text(html)
         log.debug("HTML report saved to %s", HTML_FILE)
 
+        md = self._render_markdown(report)
+        MD_FILE = REPORT_DIR / f"data_analysis_report_{REPORT_VERSION}.md"
+        MD_FILE.write_text(md)
+        log.debug("Markdown report saved to %s", MD_FILE)
+
         repo_root = Path(__file__).resolve()
         for parent in repo_root.parents:
             if (parent / ".git").exists():
@@ -171,7 +176,9 @@ class DataAnalysis(WfTask):
                 break
         repo_html = repo_root / "data_analysis_report.html"
         repo_html.write_text(html)
-        log.debug("Latest HTML report copied to repo root: %s", repo_html)
+        repo_md = repo_root / "data_analysis_report.md"
+        repo_md.write_text(md)
+        log.debug("Latest HTML + MD reports copied to repo root: %s", repo_root)
 
         resp.message = f"Data analysis {REPORT_VERSION} complete — reports at {REPORT_DIR}"
         resp.ctx_data["analysis_report_path"] = str(JSON_FILE)
@@ -1099,6 +1106,250 @@ class DataAnalysis(WfTask):
         ]
 
         return result
+
+    # ------------------------------------------------------------------
+    # Markdown report rendering
+    # ------------------------------------------------------------------
+
+    def _render_markdown(self, report: dict) -> str:
+        splits = report.get("splits", {})
+        insights = report.get("analyst_insights", [])
+        recs = report.get("recommendations", [])
+        cross = report.get("cross_split_analysis", {})
+        col_class = report.get("column_classification", {})
+        col_class_stats = report.get("column_classification_stats", {})
+        thinking = report.get("analyst_thinking", {})
+
+        lines: list[str] = []
+        a = lines.append
+
+        a(f"# BETH Dataset — Cybersecurity Data Analysis Report")
+        a(f"")
+        a(f"**Version:** {REPORT_VERSION} | "
+          f"**Generated:** {report.get('generated_at', 'N/A')} | "
+          f"**Splits:** {len(splits)}")
+        a("")
+
+        # --- Split summary ---
+        a("## Dataset Overview")
+        a("")
+        a("| Split | Rows | Columns | Attack % | Suspicious % | Duplicates |")
+        a("|-------|-----:|--------:|---------:|-------------:|-----------:|")
+        for sname, sstat in splits.items():
+            evil = sstat.get("class_distribution", {}).get("evil", {})
+            sus = sstat.get("class_distribution", {}).get("sus", {})
+            evil_pct = evil.get("pct_positive", 0)
+            sus_pct = sus.get("pct_positive", 0)
+            a(f"| {sname} | {sstat['row_count']:,} | {sstat['column_count']} | "
+              f"{evil_pct:.1f}% | {sus_pct:.1f}% | {sstat.get('duplicate_rows', 0):,} |")
+        a("")
+
+        # --- Insights ---
+        a("## Analyst Insights")
+        a("")
+        for ins in insights:
+            sev = ins.get("severity", "info").upper()
+            a(f"- **[{sev}]** {ins.get('message', '')}")
+        a("")
+
+        # --- Column Classification ---
+        a("## Column Classification")
+        a("")
+        for cat_name, cols in col_class.items():
+            display = cat_name.replace("_", " ").title()
+            a(f"- **{display}**: {', '.join(f'`{c}`' for c in cols)}")
+        a("")
+
+        if col_class_stats:
+            a("### Categorical ID Statistics (Training Split)")
+            a("")
+            a("| Column | Unique Values | Top 5 | Interpretation |")
+            a("|--------|-------------:|-------|----------------|")
+            for col_name, cstat in col_class_stats.items():
+                top5 = ", ".join(str(v) for v in cstat.get("top5_values", []))
+                uniq = cstat.get("unique_count", "?")
+                uniq_str = f"{uniq:,}" if isinstance(uniq, (int, float)) else str(uniq)
+                a(f"| `{col_name}` | {uniq_str} | {top5} | "
+                  f"{cstat.get('interpretation', '')} |")
+            a("")
+
+        # --- Cross-split analysis ---
+        if cross:
+            a("## Cross-Split Analysis")
+            a("")
+            class_shift = cross.get("class_distribution_shift", {})
+            if class_shift:
+                a("### Class Distribution Shift")
+                a("")
+                for split_name, shift in class_shift.items():
+                    a(f"- **{split_name}**: evil={shift.get('evil_pct', 0):.1f}%, "
+                      f"sus={shift.get('sus_pct', 0):.1f}%")
+                a("")
+
+            col_consistency = cross.get("column_consistency", {})
+            if col_consistency:
+                shared = col_consistency.get("shared_columns", [])
+                a(f"**Shared columns across all splits:** {len(shared)} columns")
+                a("")
+
+        # --- Recommendations ---
+        a("## Recommendations")
+        a("")
+        for i, rec in enumerate(recs, 1):
+            a(f"{i}. {rec}")
+        a("")
+
+        # --- Deep-Dive Sections ---
+        a("---")
+        a("")
+        a("# Data Analyst's Deep Dive")
+        a("")
+
+        # Core problem
+        core = thinking.get("the_core_problem", {})
+        if core:
+            a(f"## {core.get('title', 'The Core Problem')}")
+            a("")
+            a(f"> {core.get('summary', '')}")
+            a("")
+
+        # Anomaly detection approaches
+        approaches = thinking.get("anomaly_detection_approaches", {})
+        if approaches:
+            a(f"## {approaches.get('title', 'Anomaly Detection Approaches')}")
+            a("")
+            a("| Approach | How It Works | Used In |")
+            a("|----------|-------------|---------|")
+            for ap in approaches.get("approaches", []):
+                a(f"| **{ap['name']}** | {ap['how']} | {ap['used_in']} |")
+            a("")
+            a(f"> **Why Autoencoder?** It's the sweet spot between simplicity and power. "
+              f"Isolation Forest is simpler but doesn't learn feature interactions. "
+              f"LSTMs are more powerful but need sequential ordering.")
+            a("")
+
+        # Autoencoder explained
+        autoenc = thinking.get("autoencoder_explained", {})
+        if autoenc:
+            a(f"## {autoenc.get('title', 'Autoencoder Explained')}")
+            a("")
+            a(f"### The Analogy")
+            a("")
+            a(f"{autoenc.get('analogy', '')}")
+            a("")
+            a(f"### The Technical Reality")
+            a("")
+            a(f"{autoenc.get('technical', '')}")
+            a("")
+
+        # Cardinality
+        cardinality = thinking.get("cardinality_explained", {})
+        if cardinality:
+            a(f"## {cardinality.get('title', 'Cardinality')}")
+            a("")
+            a(f"{cardinality.get('analogy', '')}")
+            a("")
+            a(f"### In Our BETH Dataset")
+            a("")
+            a(f"{cardinality.get('in_our_data', '')}")
+            a("")
+
+        # Evaluation metrics
+        metrics = thinking.get("evaluation_metrics_explained", {})
+        if metrics:
+            a(f"## {metrics.get('title', 'Evaluation Metrics')}")
+            a("")
+            a(f"**Scenario:** {metrics.get('scenario', '')}")
+            a("")
+            a("| Metric | Question | Example | Meaning |")
+            a("|--------|----------|---------|---------|")
+            for mname, minfo in metrics.get("metrics", {}).items():
+                display = mname.replace("_", " ").upper()
+                if mname == "f1_score":
+                    display = "F1 SCORE"
+                elif mname == "roc_auc":
+                    display = "ROC-AUC"
+                a(f"| **{display}** | {minfo['question']} | {minfo['example']} | "
+                  f"{minfo['meaning']} |")
+            a("")
+            why = metrics.get("why_not_accuracy", {})
+            if why:
+                a(f"### Why Not Just Use Accuracy?")
+                a("")
+                a(f"> {why.get('explanation', '')}")
+                a("")
+
+        # DL vs ML
+        dl_vs_ml = thinking.get("dl_vs_ml_vs_metrics", {})
+        if dl_vs_ml:
+            a(f"## {dl_vs_ml.get('title', 'DL vs ML vs Metrics')}")
+            a("")
+            a(f"> {dl_vs_ml.get('summary', '')}")
+            a("")
+            for ckey, cinfo in dl_vs_ml.get("categories", {}).items():
+                display = ckey.replace("_", " ").title()
+                a(f"### {display}")
+                a("")
+                a(f"- **What:** {cinfo['what']}")
+                a(f"- **Examples:** {cinfo['examples']}")
+                a(f"- *{cinfo['analogy']}*")
+                a("")
+            a(f"**In Our Project:** {dl_vs_ml.get('our_project', '')}")
+            a("")
+
+        # Args column analysis
+        args = thinking.get("args_column_analysis", {})
+        if args:
+            a("---")
+            a("")
+            a(f"## {args.get('title', 'Args Column Analysis')}")
+            a("")
+            a(f"> **The Story:** {args.get('story', '')}")
+            a("")
+            a("### Signal-by-Signal Breakdown")
+            a("")
+            a("| Signal | Description | Training (normal) | Test (attacks) | Separation |")
+            a("|--------|-------------|------------------:|---------------:|-----------:|")
+            for f in args.get("key_findings", []):
+                a(f"| `{f.get('signal', '')}` | {f.get('description', '')} | "
+                  f"{f.get('training_pct', 0)}% | {f.get('attack_pct', 0)}% | "
+                  f"**{f.get('separation', '?')}** |")
+            a("")
+
+            for f in args.get("key_findings", []):
+                a(f"#### `{f.get('signal', '')}`")
+                a("")
+                a(f"**Analyst thinking:** {f.get('analyst_thinking', '')}")
+                a("")
+                if f.get("real_examples"):
+                    a(f"**Real examples found:** {', '.join(f'`{e}`' for e in f['real_examples'])}")
+                    a("")
+
+            a(f"> **The Lesson:** {args.get('lesson', '')}")
+            a("")
+            a("### Features to Extract from args")
+            a("")
+            a("| Feature | Formula | Type |")
+            a("|---------|---------|------|")
+            for ft in args.get("features_to_extract", []):
+                a(f"| `{ft['name']}` | `{ft['formula']}` | {ft['type']} |")
+            a("")
+
+        # Analyst perspective
+        perspective = thinking.get("analyst_perspective", {})
+        if perspective:
+            a("---")
+            a("")
+            a(f"## {perspective.get('title', 'Analyst Synthesis')}")
+            a("")
+            a(f"{perspective.get('thinking', '')}")
+            a("")
+
+        a("---")
+        a(f"*BETH Dataset Analysis {REPORT_VERSION} | Cyber Attack Detection Pipeline | "
+          f"Generated by data_analysis task*")
+
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # HTML report rendering
