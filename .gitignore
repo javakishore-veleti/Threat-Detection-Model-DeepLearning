@@ -201,6 +201,9 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Runtime logs (RotatingFileHandler output)
+runtime_logs/
+
 # Node (package.json used as task runner only)
 node_modules/
 package-lock.json

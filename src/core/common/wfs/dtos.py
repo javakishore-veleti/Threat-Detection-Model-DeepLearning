@@ -16,3 +16,4 @@ class WfResp:
     success: bool = True
     message: str = ""
     ctx_data: dict = field(default_factory=dict)
+    tasks_executed: list = field(default_factory=list)

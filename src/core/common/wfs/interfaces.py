@@ -9,7 +9,7 @@ class MainWf(ABC):
     """
 
     @abstractmethod
-    def execute(self, req: WfReq) -> WfResp: ...
+    def execute(self, req: WfReq, resp: WfResp) -> WfResp: ...
 
 
 class SubWf(ABC):
@@ -18,7 +18,7 @@ class SubWf(ABC):
     """
 
     @abstractmethod
-    def execute(self, req: WfReq) -> WfResp: ...
+    def execute(self, req: WfReq, resp: WfResp) -> WfResp: ...
 
 
 class WfTask(ABC):
@@ -27,4 +27,4 @@ class WfTask(ABC):
     """
 
     @abstractmethod
-    def execute(self, req: WfReq) -> WfResp: ...
+    def execute(self, req: WfReq, resp: WfResp) -> WfResp: ...

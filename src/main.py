@@ -1,6 +1,6 @@
 """
-Facade entry point. Constructs WfReq, dynamically loads the requested
-pipeline's MainWf implementation, and calls execute().
+Facade entry point. Constructs a single WfReq and WfResp, dynamically loads
+the requested pipeline's MainWf implementation, and calls execute().
 
 Usage:
     python src/main.py <pipeline_name> [--start-from <step>] [--resume <checkpoint>]
@@ -14,6 +14,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core.common.wfs.dtos import WfReq, WfResp
+from core.logger import get_logger
+
+log = get_logger(__name__)
 
 
 def parse_args():
@@ -37,12 +40,19 @@ def main():
         resume=args.resume,
         config_path=args.config,
     )
+    resp = WfResp()
+
+    log.debug("Starting pipeline: %s", args.pipeline)
 
     module = importlib.import_module(f"pipelines.{args.pipeline}.main")
     pipeline_cls = getattr(module, "Pipeline")
-    resp: WfResp = pipeline_cls().execute(req)
+    resp = pipeline_cls().execute(req, resp)
+
+    log.debug("Pipeline finished — success=%s, tasks_executed=%d",
+              resp.success, len(resp.tasks_executed))
 
     if not resp.success:
+        log.error("Pipeline failed: %s", resp.message)
         print(f"Pipeline failed: {resp.message}", file=sys.stderr)
         sys.exit(1)
 
