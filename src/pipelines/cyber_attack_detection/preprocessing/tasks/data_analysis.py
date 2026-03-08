@@ -39,8 +39,11 @@ TRUE_NUMERIC = ["timestamp", "argsNum", "returnValue"]
 # String columns (already detected as object dtype by pandas)
 STRING_CATEGORICAL = ["processName", "hostName", "eventName"]
 
-# Complex / drop-for-now columns
-COMPLEX_DROP = ["args", "stackAddresses"]
+# Columns to drop (stackAddresses only — args is parsed for features in feature_engineering)
+COMPLEX_DROP = ["stackAddresses"]
+
+# Columns to parse in feature engineering then drop (raw string not usable by model directly)
+PARSE_THEN_DROP = ["args"]
 
 # Labels (not features)
 LABEL_COLS = ["evil", "sus"]
@@ -81,12 +84,22 @@ COLUMN_CLASSIFICATION = {
     },
     "complex_drop": {
         "columns": COMPLEX_DROP,
-        "treatment": "Drop for initial model. Revisit for advanced feature engineering.",
+        "treatment": "Drop — not usable without deep binary analysis.",
         "detail": (
-            "args = nested JSON-like string with syscall argument details. Parsing it could "
-            "yield powerful features (e.g., file paths accessed, network addresses) but adds "
-            "significant complexity. "
-            "stackAddresses = list of memory addresses from the call stack."
+            "stackAddresses = list of memory addresses from the call stack. "
+            "Requires binary analysis expertise to extract useful features."
+        ),
+    },
+    "parse_then_drop": {
+        "columns": PARSE_THEN_DROP,
+        "treatment": "Parse in feature engineering to extract binary features, then drop raw string.",
+        "detail": (
+            "args = nested JSON-like string with syscall argument details. Contains file paths, "
+            "flags, and argument values. Data analysis revealed STRONG attack signals: "
+            "normal ops access /proc/ 34% of the time vs 0.4% in attacks (90x difference), "
+            "normal has 13x more write flags than attacks. Extract binary features "
+            "(args_touches_proc, args_touches_etc, args_has_write_flag, args_is_hidden_path, "
+            "args_has_pathname) then drop the raw column."
         ),
     },
     "labels": {
@@ -160,6 +173,7 @@ class DataAnalysis(WfTask):
         resp.ctx_data["raw_frames"] = frames
         resp.ctx_data["column_classification"] = COLUMN_CLASSIFICATION
         resp.ctx_data["drop_columns"] = list(COMPLEX_DROP)
+        resp.ctx_data["parse_then_drop_columns"] = list(PARSE_THEN_DROP)
         resp.ctx_data["label_columns"] = list(LABEL_COLS)
         resp.ctx_data["target_col"] = LABEL_COLS[0]
         resp.ctx_data["aux_col"] = LABEL_COLS[1]
@@ -579,8 +593,12 @@ class DataAnalysis(WfTask):
             {
                 "step": "cleaning",
                 "priority": 1,
-                "action": "Drop 'args' and 'stackAddresses' columns",
-                "reason": "Complex nested structures that need advanced parsing. Start simple.",
+                "action": "Drop 'stackAddresses'. KEEP 'args' for feature extraction.",
+                "reason": (
+                    "stackAddresses needs binary analysis — drop it. args contains file "
+                    "paths and flags with strong attack signal (90x /proc/ access difference "
+                    "between normal and attacks). Parse in feature engineering."
+                ),
             },
             {
                 "step": "cleaning",

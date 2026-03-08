@@ -53,7 +53,8 @@
 
 #### Step 3 — Cleaning
 
-- Drop `args` and `stackAddresses` columns (complex nested structures — park for later)
+- Drop `stackAddresses` column (memory addresses — not useful without deep binary analysis)
+- **Keep `args` column** — it contains file paths, flags, and syscall arguments with strong attack signal (parsed in feature engineering)
 - Handle missing values using **training set medians/modes only** (no data leakage from val/test)
 - Separate labels (`evil`, `sus`) from features before any transformation
 - Store cleaned DataFrames and labels in `resp.ctx_data`
@@ -72,14 +73,25 @@ consistent with our column classification — no arithmetic on categorical ID co
 | `is_child_of_init` | `parentProcessId == 1` | Normal process tree — system services are children of init; attacker shells are spawned from compromised processes (web server, sshd) | Process tree analysis in Falco, Sysdig, CrowdStrike |
 | `is_orphan` | `parentProcessId == 0` | Process injection — orphan processes (parent died or was manipulated) can indicate injection attacks or process hiding | MITRE T1055 (Process Injection) |
 | `is_high_args` | `argsNum > training 95th percentile` | Unusually complex syscalls — buffer overflows and command injection stuff extra arguments | Anomaly-based IDS signature design |
+| `args_touches_proc` | `/proc/` in args pathnames | Normal ops access /proc/ 34% of the time; attacks only 0.38% — **90x difference** | /proc/ enumeration is standard system monitoring |
+| `args_touches_etc` | `/etc/` in args pathnames | Config file access patterns differ between normal (2.4%) and attack (0.3%) traffic | Config file monitoring in OSSEC, auditd |
+| `args_has_write_flag` | `O_WRONLY\|O_RDWR\|O_CREAT` in flags | Normal has 13x more writes than attacks — attacks focus on reading/exfiltrating | File integrity monitoring (FIM) |
+| `args_is_hidden_path` | `/.` in args pathnames | Hidden dirs used for malware staging (e.g., `/tmp/.X25-unix/.rsync/`) | MITRE T1564.001 (Hidden Files and Directories) |
+| `args_has_pathname` | Any pathname present in args | Whether this syscall involves filesystem access at all | Basic syscall categorization |
 
 **Why not `processId / parentProcessId` or `argsNum / eventId`?** Our data analysis proved
 processId and eventId are categorical identifiers, not quantities. Dividing them produces
 meaningless numbers (PID 500 / PID 250 = 2 has no semantic meaning). The features above
 use only binary/categorical derivations that respect the column classification.
 
+**Why extract from `args` instead of dropping it?** Data analysis revealed the `args` column
+contains file paths and flags with massive signal separation between normal and attack traffic.
+We parse it once during feature engineering into lightweight binary features, then drop the
+raw string column before encoding.
+
 - Apply identical transformations to train, val, and test
 - `is_high_args` threshold must be computed from **training data only** (no data leakage)
+- `args` binary features are extracted in feature engineering, then the raw `args` column is dropped
 
 #### Step 5 — Encoding
 
