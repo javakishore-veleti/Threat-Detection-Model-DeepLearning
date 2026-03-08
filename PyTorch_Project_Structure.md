@@ -9,77 +9,62 @@ Threat-Detection-Model-DeepLearning/
 ├── pyproject.toml                # Python deps managed via uv
 ├── README.md
 │
-├── configs/                      # All hyperparams and settings — NOT in code
-│   ├── default.yaml              # Base config (data paths, model, training, preprocessing)
-│   └── experiment/
-│       └── baseline.yaml         # Per-experiment overrides
+├── configs/
+│   └── cyber_attack_detection/   # Per-pipeline config (one folder per pipeline)
+│       ├── default.yaml
+│       └── experiment/
+│           └── baseline.yaml
 │
 ├── src/
 │   └── threat_detection/
-│       ├── __init__.py
 │       │
-│       ├── data/                 # Data access layer
-│       │   ├── __init__.py
-│       │   ├── download.py       # Kaggle API download + raw data caching
-│       │   ├── dataset.py        # torch.utils.data.Dataset subclass(es)
-│       │   └── datamodule.py     # Builds DataLoaders, handles train/val/test splits
+│       ├── sub_workflows/        # Reusable sub-workflow base + implementations
+│       │   ├── base.py           # BaseSubWorkflow ABC
+│       │   ├── download.py       # Sub-workflow: fetch data from source
+│       │   ├── preprocessing.py  # Sub-workflow: clean -> features -> encode -> scale
+│       │   ├── model_setup.py    # Sub-workflow: instantiate model, optimizer, scheduler
+│       │   └── train_eval.py     # Sub-workflow: train + validate per epoch, then test
 │       │
-│       ├── preprocessing/        # Full preprocessing pipeline (stage by stage)
-│       │   ├── __init__.py
-│       │   ├── cleaning.py       # Missing values, duplicates, outliers, type casting
-│       │   ├── feature_engineering.py  # Derive features from raw network traffic fields
-│       │   ├── encoding.py       # Label encoding, one-hot for categorical columns
-│       │   ├── scaling.py        # StandardScaler / MinMaxScaler on numeric features
-│       │   └── run_preprocessing.py    # Orchestrates all stages: raw -> processed
+│       ├── preprocessing/        # Preprocessing stage implementations
+│       │   ├── cleaning.py
+│       │   ├── feature_engineering.py
+│       │   ├── encoding.py
+│       │   └── scaling.py
 │       │
 │       ├── models/               # Model definitions only — no training logic
-│       │   ├── __init__.py
-│       │   ├── baseline.py       # First model (MLP or 1D-CNN)
-│       │   └── components.py     # Reusable blocks (attention, residual, etc.)
+│       │   ├── baseline.py
+│       │   └── components.py
 │       │
 │       ├── training/             # Training and evaluation loops
-│       │   ├── __init__.py
-│       │   ├── trainer.py        # Train/val loop, checkpointing, early stopping
-│       │   ├── losses.py         # Custom loss functions (focal loss, weighted CE, etc.)
-│       │   └── metrics.py        # Precision, recall, F1, AUC, confusion matrix
+│       │   ├── trainer.py        # Epoch loop with interleaved train/val + checkpoint
+│       │   ├── losses.py
+│       │   └── metrics.py
 │       │
-│       ├── inference/            # Prediction / serving
-│       │   ├── __init__.py
-│       │   └── predict.py        # Load checkpoint, run inference on new data
+│       ├── inference/
+│       │   └── predict.py
 │       │
-│       ├── pipeline/             # End-to-end workflow orchestration
-│       │   ├── __init__.py
-│       │   └── workflow.py       # Chains: download -> preprocess -> split -> train -> evaluate
+│       ├── pipelines/            # Each pipeline composes sub-workflows
+│       │   ├── registry.py       # Register and discover pipelines by name
+│       │   └── cyber_attack_detection.py
 │       │
 │       └── utils/
-│           ├── __init__.py
-│           ├── logger.py         # Structured logging
-│           ├── seed.py           # Reproducibility
-│           └── config.py         # YAML config loader + validation
+│           ├── logger.py
+│           ├── seed.py
+│           └── config.py
 │
-├── scripts/                      # Thin CLI entry points
-│   ├── run_pipeline.py           # Run the full workflow end-to-end
-│   ├── download_data.py          # Just download
-│   ├── preprocess.py             # Just preprocess
-│   ├── train.py                  # Just train
-│   ├── evaluate.py               # Just evaluate
-│   └── predict.py                # One-off inference
+├── scripts/
+│   ├── run_pipeline.py           # python scripts/run_pipeline.py --pipeline cyber_attack_detection
+│   └── run_sub_workflow.py       # python scripts/run_sub_workflow.py --pipeline cyber_attack_detection --step preprocessing
 │
 ├── notebooks/
-│   └── 01_eda.ipynb
-│
 ├── tests/
-│   ├── test_preprocessing.py
-│   ├── test_dataset.py
-│   ├── test_model.py
-│   └── test_training.py
 │
-├── data/                         # gitignored
-│   ├── raw/                      # Untouched downloads
-│   ├── processed/                # After preprocessing pipeline
-│   └── splits/                   # train.pt / val.pt / test.pt
+├── data/                         # gitignored — per-pipeline subdirectories
+│   ├── raw/
+│   ├── processed/
+│   └── splits/
 │
-├── outputs/                      # gitignored
+├── outputs/                      # gitignored — per-pipeline subdirectories
 │   ├── checkpoints/
 │   ├── logs/
 │   └── predictions/
@@ -89,139 +74,134 @@ Threat-Detection-Model-DeepLearning/
 
 ---
 
-## Pipeline / Workflow Concept
+## Multi-Pipeline Architecture
 
-This is the core of how professional projects differ from academic ones. Instead of running disconnected scripts, a single `pipeline/workflow.py` orchestrates every step:
+The project is a **registry of pipelines**, each composed of **sub-workflows**. The first pipeline is `cyber_attack_detection`. Future pipelines plug into the same structure.
 
 ```mermaid
-flowchart LR
-    A[Download] --> B[Clean]
-    B --> C[FeatureEng]
-    C --> D[Encode]
-    D --> E[Scale]
-    E --> F[Split]
-    F --> G[Train]
-    G --> H[Evaluate]
-
-    subgraph preprocess [Preprocessing Pipeline]
-        B
-        C
-        D
-        E
+flowchart TD
+    subgraph registry [Pipeline Registry]
+        CAD["cyber_attack_detection"]
+        FUTURE["future_pipeline_2..."]
     end
+
+    CAD --> DL
+    CAD --> PP
+    CAD --> MS
+    CAD --> TE
+
+    subgraph subworkflows [Sub-Workflows]
+        DL["1. Download"]
+        PP["2. Preprocessing"]
+        MS["3. Model Setup"]
+        TE["4. Train / Validate / Test"]
+    end
+
+    DL -->|"data/raw/"| PP
+    PP -->|"data/processed/"| MS
+    MS -->|"model + config"| TE
+    TE -->|"outputs/checkpoints/"| DONE[Results]
 ```
 
-Each step:
+### Per-pipeline isolation
 
-- Reads from a known location (`data/raw/`, `data/processed/`, etc.)
-- Writes to the next stage's input location
-- Is independently runnable (`python scripts/preprocess.py`) OR chained via the workflow
-- Logs what it did and can be skipped if output already exists (idempotent)
+Each pipeline gets its own subdirectories so they never collide:
 
-### `pipeline/workflow.py` — the orchestrator
-
-```python
-class Pipeline:
-    def __init__(self, config):
-        self.config = config
-        self.steps = [
-            ("download",    self._download),
-            ("preprocess",  self._preprocess),
-            ("split",       self._split),
-            ("train",       self._train),
-            ("evaluate",    self._evaluate),
-        ]
-
-    def run(self, start_from="download", stop_after="evaluate"):
-        """Run pipeline steps between start_from and stop_after inclusive."""
-        ...
-
-    def _preprocess(self):
-        """Chains cleaning -> feature_eng -> encoding -> scaling."""
-        ...
+```
+data/raw/cyber_attack_detection/
+data/processed/cyber_attack_detection/
+outputs/checkpoints/cyber_attack_detection/
+outputs/logs/cyber_attack_detection/
 ```
 
-Run the full pipeline: `npm run pipeline`
-Restart from a specific stage: `python scripts/run_pipeline.py --start-from train`
+### Adding a future pipeline
+
+1. Create `configs/<new_pipeline_name>/default.yaml`
+2. Create `pipelines/<new_pipeline_name>.py` composing its sub-workflows
+3. Reuse existing sub-workflows or create new ones in `sub_workflows/`
+4. Run: `npm run pipeline -- --pipeline <new_pipeline_name>`
 
 ---
 
-## Preprocessing Module (Detailed)
+## Sub-Workflow Design
 
-### `cleaning.py`
+Each sub-workflow inherits from `BaseSubWorkflow` with three methods:
 
-- Drop duplicates, handle missing values (impute or drop based on config thresholds)
-- Remove constant/near-constant columns
-- Cast dtypes (string timestamps to datetime, object cols to numeric where possible)
-- Flag and handle outliers (IQR or z-score, configurable)
+| Method | Purpose |
+|---|---|
+| `validate_inputs()` | Raise if required inputs are missing from config or context |
+| `should_skip()` | Return True if outputs already exist (idempotent) |
+| `run()` | Execute the sub-workflow, return updated context dict |
 
-### `feature_engineering.py`
+A shared `context` dict flows between sub-workflows. Each reads what it needs and adds its outputs.
 
-- Derive new features from raw network traffic fields (e.g., bytes-per-packet, flow duration ratios, flag counts)
-- Time-windowed aggregations if applicable
-- Domain-specific features for threat detection
+### The four sub-workflows for cyber_attack_detection
 
-### `encoding.py`
+**1. Download** — fetch dataset from Kaggle (configurable source/dataset in YAML). Adds `context["raw_data_path"]`.
 
-- Label-encode the target column (attack type -> integer)
-- One-hot or ordinal encoding for categorical features (protocol_type, service, flag)
-- Store encoder objects to `data/processed/encoders/` for inference reuse
+**2. Preprocessing** — chains cleaning -> feature engineering -> encoding -> scaling using the `preprocessing/` stage modules. Saves encoders/scalers as artifacts for inference reuse.
 
-### `scaling.py`
+**3. Model Setup** — instantiate model, optimizer, scheduler from config. If resuming from a checkpoint, restores all states and the epoch counter.
 
-- Fit StandardScaler or MinMaxScaler on training data only (prevents data leakage)
-- Transform val/test using the fitted scaler
-- Save scaler to `data/processed/scalers/` for inference reuse
+**4. Train / Validate / Test** — one sub-workflow because training and validation are interleaved per epoch:
+  - Each epoch: train -> validate -> checkpoint -> early stop check
+  - After all epochs: test with best model
 
-### `run_preprocessing.py` — chains them together
+---
 
-```python
-def run_preprocessing(config):
-    df = load_raw_data(config)
-    df = clean(df, config.preprocessing.cleaning)
-    df = engineer_features(df, config.preprocessing.features)
-    df = encode(df, config.preprocessing.encoding)
-    df = scale(df, config.preprocessing.scaling)
-    save_processed(df, config.data.processed_dir)
-```
+## Preprocessing Stages
+
+| Stage | File | What it does |
+|---|---|---|
+| Cleaning | `cleaning.py` | Duplicates, missing values, outliers, dtype casting |
+| Feature Engineering | `feature_engineering.py` | Derive features from raw network traffic fields |
+| Encoding | `encoding.py` | Label-encode target, one-hot/ordinal for categoricals |
+| Scaling | `scaling.py` | StandardScaler/MinMaxScaler, fit on train only |
+
+Encoders and scalers are saved to `data/processed/<pipeline>/artifacts/` so inference uses the exact same transformations.
 
 ---
 
 ## Config-Driven Design
 
-All hyperparameters live in YAML files under `configs/`. Code reads config — never hardcodes values like `lr=0.001`. This makes experiments reproducible and diffable in git.
+All hyperparameters live in YAML under `configs/<pipeline_name>/`. Code never hardcodes values.
 
-### Example: `configs/default.yaml`
+### Example: `configs/cyber_attack_detection/default.yaml`
 
 ```yaml
-seed: 42
+pipeline:
+  name: "cyber_attack_detection"
+  description: "Detect cyber attacks in network traffic"
 
-data:
-  dataset: "CICIDS2017"
-  raw_dir: "data/raw"
-  processed_dir: "data/processed"
-  splits_dir: "data/splits"
-  batch_size: 256
-  num_workers: 4
-  val_split: 0.2
-  test_split: 0.1
+download:
+  source: "kaggle"
+  dataset: "cicids2017"
+  destination: "data/raw/cyber_attack_detection"
 
 preprocessing:
   cleaning:
     drop_duplicates: true
-    missing_threshold: 0.5       # drop columns with >50% missing
-    outlier_method: "iqr"        # "iqr", "zscore", or "none"
+    missing_threshold: 0.5
+    outlier_method: "iqr"
     outlier_factor: 1.5
   features:
     derive_ratios: true
-    time_windows: [30, 60, 300]  # seconds
+    time_windows: [30, 60, 300]
   encoding:
     target_column: "label"
     categorical_columns: ["protocol_type", "service", "flag"]
-    method: "onehot"             # "onehot" or "ordinal"
+    method: "onehot"
   scaling:
-    method: "standard"           # "standard" or "minmax"
-    columns: "numeric"           # "numeric" = all numeric cols, or explicit list
+    method: "standard"
+    columns: "numeric"
+
+data:
+  processed_dir: "data/processed/cyber_attack_detection"
+  splits_dir: "data/splits/cyber_attack_detection"
+  batch_size: 256
+  num_workers: 4
+  val_split: 0.2
+  test_split: 0.1
 
 model:
   name: "baseline"
@@ -233,90 +213,62 @@ training:
   lr: 0.001
   weight_decay: 1e-5
   early_stopping_patience: 5
-  checkpoint_dir: "outputs/checkpoints"
+  checkpoint_dir: "outputs/checkpoints/cyber_attack_detection"
+  log_dir: "outputs/logs/cyber_attack_detection"
+
+seed: 42
 ```
-
-Per-experiment overrides in `configs/experiment/baseline.yaml` only need to specify what differs from `default.yaml`.
-
----
-
-## Key Professional Patterns
-
-### 1. Data Module Pattern
-
-A `DataModule` class owns the full data pipeline — load processed data, split, and build DataLoaders. Training code never touches files directly.
-
-### 2. Trainer Owns the Loop
-
-A `Trainer` class handles: train loop, validation loop, checkpointing, early stopping, metric logging, and device management. Models stay pure `nn.Module` — no training logic inside them.
-
-### 3. Reproducibility Baked In
-
-`seed.py` sets `torch.manual_seed`, `numpy.random.seed`, `random.seed`, and `torch.backends.cudnn.deterministic`. Called once at startup from config.
-
-### 4. Scripts Are Thin
-
-`scripts/train.py` is ~20 lines: parse args, load config, instantiate data/model/trainer, call `trainer.fit()`. All real logic lives in `src/`.
-
-### 5. Preprocessing Artifacts Are Saved
-
-Encoders and scalers are persisted to disk so that inference uses the exact same transformations as training. No fit-transform at inference time.
 
 ---
 
 ## Running the Project
 
-### Full pipeline (first time or clean run)
+### Full pipeline
 
 ```bash
 npm run pipeline
 ```
 
-Runs every stage end-to-end: download -> preprocess -> split -> train -> evaluate.
+Runs all four sub-workflows: download -> preprocessing -> model_setup -> train_eval.
 
-### Restart from a specific stage
-
-If training fails or you only changed the model, skip the earlier stages:
+### Restart from a specific sub-workflow
 
 ```bash
-npm run pipeline:from -- train
+npm run pipeline:from -- preprocessing
+npm run pipeline:from -- model_setup
+npm run pipeline:from -- train_eval
 ```
 
-Each stage checks if its output already exists (`data/processed/`, `data/splits/`, etc.) and skips completed work automatically.
+Skips earlier sub-workflows. Each sub-workflow also checks if its output already exists.
+
+### Run a single sub-workflow
+
+```bash
+npm run sub-workflow -- download
+npm run sub-workflow -- preprocessing
+```
 
 ### Resume interrupted training (checkpoint)
-
-If training was interrupted mid-epoch (crash, Ctrl+C, machine restart), the `Trainer` saves a checkpoint at the end of every epoch. Resume from exactly where you stopped:
 
 ```bash
 npm run train:resume
 ```
 
-This loads `outputs/checkpoints/last.pt` which contains:
+Loads `outputs/checkpoints/cyber_attack_detection/last.pt` containing model weights, optimizer state, epoch number, and best metric. Picks up exactly where it stopped.
 
-- Model weights (`model.state_dict()`)
-- Optimizer state (learning rates, momentum buffers)
-- Current epoch number
-- Best validation metric so far
-- Scheduler state
-
-So if training dies at epoch 35 of 50, it picks up at epoch 35 — not epoch 0.
-
-The trainer always saves two checkpoint files:
-
-| File | When saved | Purpose |
+| Checkpoint file | Saved when | Purpose |
 |---|---|---|
-| `outputs/checkpoints/last.pt` | End of every epoch | Resume interrupted training |
-| `outputs/checkpoints/best.pt` | When validation metric improves | Use for inference and evaluation |
+| `last.pt` | End of every epoch | Resume interrupted training |
+| `best.pt` | Validation metric improves | Inference and evaluation |
 
-### How it all fits together
+### How it fits together
 
 ```mermaid
 flowchart TD
-    A["npm run pipeline"] --> B{Stage outputs exist?}
-    B -->|Yes| C[Skip to next stage]
-    B -->|No| D[Run stage]
-    D --> E{Training stage?}
+    A["npm run pipeline"] --> B{Sub-workflow outputs exist?}
+    B -->|Yes| C[Skip to next sub-workflow]
+    B -->|No| D[Run sub-workflow]
+    D --> E{Train/eval sub-workflow?}
     E -->|Yes| F{Checkpoint exists?}
     F -->|Yes| G["Resume from last.pt"]
     F -->|No| H[Start from epoch 0]
@@ -338,20 +290,16 @@ flowchart TD
 | `npm run setup-venv-daily` | Daily: verify env, sync deps, set up shell alias |
 | `npm run teardown` | Remove the conda environment |
 
-After running `setup-venv-daily` once, activate the env with: `pytorch_project_tdm`
+After `setup-venv-daily`, activate with: `pytorch_project_tdm`
 
-### Pipeline and Stages
+### Pipeline
 
 | Command | What it does |
 |---|---|
-| `npm run pipeline` | Full end-to-end: download -> preprocess -> split -> train -> evaluate |
-| `npm run pipeline:from -- <stage>` | Restart from a specific stage (download, preprocess, split, train, evaluate) |
-| `npm run download-data` | Fetch dataset from Kaggle |
-| `npm run preprocess` | Run only the preprocessing pipeline |
-| `npm run train` | Run training from scratch |
+| `npm run pipeline` | Full end-to-end (default: cyber_attack_detection) |
+| `npm run pipeline:from -- <step>` | Restart from a sub-workflow (download, preprocessing, model_setup, train_eval) |
+| `npm run sub-workflow -- <step>` | Run a single sub-workflow |
 | `npm run train:resume` | Resume training from last checkpoint |
-| `npm run evaluate` | Run evaluation using best checkpoint |
-| `npm run predict` | Run inference on new data |
 
 ---
 
