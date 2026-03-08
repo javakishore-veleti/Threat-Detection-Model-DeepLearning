@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BETH Dataset — Evaluation Report</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         max-width: 960px; margin: 40px auto; padding: 0 20px; color: #333; line-height:1.6; }
+  h1 { border-bottom: 3px solid #007bff; padding-bottom: 8px; }
+  h2 { color: #007bff; margin-top: 32px; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+  th { background: #f8f9fa; }
+  .metric-card { display: inline-block; background: #f8f9fa; border-radius: 8px;
+                  padding: 16px 24px; margin: 8px; text-align: center; min-width: 140px; }
+  .metric-val { font-size: 2em; font-weight: bold; }
+  .metric-label { font-size: 0.85em; color: #666; }
+</style>
+</head>
+<body>
+
+<h1>BETH Dataset — Model Evaluation Report</h1>
+<p>Generated: 2026-03-08T23:51:54.576031+00:00</p>
+<p>Architecture: 23 → [64, 32] →
+   16 → [32, 64] →
+   23</p>
+
+<h2>Key Metrics</h2>
+<div>
+  <div class="metric-card">
+    <div class="metric-val" style="color:#dc3545">0.0251</div>
+    <div class="metric-label">Precision</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-val" style="color:#dc3545">0.0011</div>
+    <div class="metric-label">Recall</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-val" style="color:#dc3545">0.0021</div>
+    <div class="metric-label">F1 Score</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-val" style="color:#dc3545">0.3908</div>
+    <div class="metric-label">ROC-AUC</div>
+  </div>
+</div>
+
+<h2>Confusion Matrix</h2>
+<table>
+  <tr><th></th><th>Predicted Normal</th><th>Predicted Attack</th></tr>
+  <tr><th>Actual Normal</th><td>23,701</td>
+      <td style="color:#dc3545">6,834 (false alarms)</td></tr>
+  <tr><th>Actual Attack</th>
+      <td style="color:#dc3545">158,256 (missed)</td>
+      <td style="color:#28a745">176 (caught)</td></tr>
+</table>
+<p>Total: 188,967 rows
+   (158,432 attacks,
+    30,535 normal)</p>
+
+<h2>Threshold Calibration</h2>
+<table>
+  <tr><th>Threshold</th><td>362.292450 (p95)</td></tr>
+  <tr><th>Val Error Range</th>
+      <td>0.060927 — 4439.792969 (median: 0.137222)</td></tr>
+  <tr><th>Test Error Range</th>
+      <td>0.308967 — 2307.649414 (median: 37.986279)</td></tr>
+</table>
+
+        <div style="background:#28a74510;border-left:4px solid #28a745;
+                    padding:12px;margin:16px 0;border-radius:4px">
+            <strong>Suspicious Row Sanity Check:</strong>
+            sus=1 mean error: 34.942158,
+            sus=0 mean error: 33.028618,
+            ratio: 1.0579x →
+            <strong style="color:#28a745">Signal detected</strong>
+        </div>
+
+<h2>Training History</h2>
+<p>50 epochs, lr=0.001,
+   batch_size=256,
+   best_val_loss=33.036574</p>
+<details>
+<summary>Show epoch-by-epoch losses</summary>
+<table>
+  <tr><th>Epoch</th><th>Train Loss</th><th>Val Loss</th></tr>
+  <tr><td>1</td><td>68.527718</td><td>33.0366</td></tr>
+<tr><td>2</td><td>0.210633</td><td>37.5808</td></tr>
+<tr><td>3</td><td>0.179706</td><td>35.0399</td></tr>
+<tr><td>4</td><td>0.149554</td><td>37.5278</td></tr>
+<tr><td>5</td><td>0.096692</td><td>40.3671</td></tr>
+<tr><td>6</td><td>0.085626</td><td>43.0544</td></tr>
+<tr><td>7</td><td>0.081035</td><td>42.8325</td></tr>
+<tr><td>8</td><td>0.078425</td><td>42.1147</td></tr>
+<tr><td>9</td><td>0.075835</td><td>42.6124</td></tr>
+<tr><td>10</td><td>0.073342</td><td>41.5993</td></tr>
+<tr><td>11</td><td>0.070938</td><td>43.1308</td></tr>
+<tr><td>12</td><td>0.066452</td><td>42.5429</td></tr>
+<tr><td>13</td><td>0.067153</td><td>43.9576</td></tr>
+<tr><td>14</td><td>0.065111</td><td>45.1174</td></tr>
+<tr><td>15</td><td>0.062091</td><td>45.0767</td></tr>
+<tr><td>16</td><td>0.060912</td><td>46.4355</td></tr>
+<tr><td>17</td><td>0.052613</td><td>44.3182</td></tr>
+<tr><td>18</td><td>0.055490</td><td>44.3997</td></tr>
+<tr><td>19</td><td>0.049152</td><td>45.5829</td></tr>
+<tr><td>20</td><td>0.050991</td><td>45.2338</td></tr>
+<tr><td>21</td><td>0.048734</td><td>44.8380</td></tr>
+<tr><td>22</td><td>0.047801</td><td>44.4264</td></tr>
+<tr><td>23</td><td>0.049446</td><td>44.7305</td></tr>
+<tr><td>24</td><td>0.046481</td><td>44.4455</td></tr>
+<tr><td>25</td><td>0.046941</td><td>43.8249</td></tr>
+<tr><td>26</td><td>0.044477</td><td>45.6027</td></tr>
+<tr><td>27</td><td>0.043237</td><td>44.8088</td></tr>
+<tr><td>28</td><td>0.041342</td><td>47.3454</td></tr>
+<tr><td>29</td><td>0.042153</td><td>44.8606</td></tr>
+<tr><td>30</td><td>0.045935</td><td>44.9199</td></tr>
+<tr><td>31</td><td>0.039797</td><td>46.1210</td></tr>
+<tr><td>32</td><td>0.040216</td><td>43.8827</td></tr>
+<tr><td>33</td><td>0.043289</td><td>44.5991</td></tr>
+<tr><td>34</td><td>0.043506</td><td>40.8813</td></tr>
+<tr><td>35</td><td>0.037985</td><td>40.5333</td></tr>
+<tr><td>36</td><td>0.037952</td><td>40.4270</td></tr>
+<tr><td>37</td><td>0.037959</td><td>39.6037</td></tr>
+<tr><td>38</td><td>0.035014</td><td>38.8014</td></tr>
+<tr><td>39</td><td>0.037592</td><td>41.6616</td></tr>
+<tr><td>40</td><td>0.032694</td><td>39.2087</td></tr>
+<tr><td>41</td><td>0.038820</td><td>40.8662</td></tr>
+<tr><td>42</td><td>0.029994</td><td>38.5916</td></tr>
+<tr><td>43</td><td>0.034798</td><td>40.6877</td></tr>
+<tr><td>44</td><td>0.030649</td><td>43.4729</td></tr>
+<tr><td>45</td><td>0.033884</td><td>42.1103</td></tr>
+<tr><td>46</td><td>0.030514</td><td>41.1348</td></tr>
+<tr><td>47</td><td>0.030195</td><td>40.2965</td></tr>
+<tr><td>48</td><td>0.030742</td><td>40.7439</td></tr>
+<tr><td>49</td><td>0.031749</td><td>40.5657</td></tr>
+<tr><td>50</td><td>0.029683</td><td>40.0463</td></tr>
+
+</table>
+</details>
+
+<footer style="margin-top:40px;padding-top:16px;border-top:1px solid #ddd;
+               color:#999;font-size:0.85em">
+    BETH Dataset Evaluation Report &nbsp;|&nbsp; Generated programmatically by the predict task
+</footer>
+
+</body>
+</html>

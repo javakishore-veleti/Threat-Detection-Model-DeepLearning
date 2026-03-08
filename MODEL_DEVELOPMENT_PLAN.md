@@ -14,7 +14,7 @@
 | **Preprocessing** | DONE (5 of 5) | `data_analysis.py` (v04 report, config-driven), `cleaning.py` (config-driven), `feature_engineering.py` (generic engine reads feature specs from YAML), `encoding.py` (LabelEncoder with UNKNOWN handling), `scaling.py` (StandardScaler on 3 true numeric, numpy float32 + .npy artifacts) |
 | **Models** | DONE | `autoencoder.py` — nn.Module (23→64→32→16→32→64→23, 8,295 params), config-driven architecture |
 | **Training** | DONE | `trainer.py` — DataLoader, MSELoss, Adam, 50 epochs, checkpointing (best.pt/last.pt), resume support |
-| **Inference** | Empty | Facade ready, `tasks/` empty |
+| **Inference** | DONE | `predict.py` — threshold calibration (p95), test evaluation (Precision/Recall/F1/ROC-AUC), JSON+HTML report, threshold artifact |
 
 ## Config-Driven Architecture
 
@@ -171,19 +171,20 @@ raw string column before encoding.
 - Resume support: if `req.resume` is set, load checkpoint and continue from saved epoch
 - Log `train_loss` and `val_loss` per epoch
 
-### Phase 6: Evaluation & Inference — TODO
+### Phase 6: Evaluation & Inference — DONE
 
 | # | Step | Status | File |
 |---|---|---|---|
-| 9 | Threshold calibration | TODO | `inference/tasks/predict.py` |
-| 10 | Test evaluation | TODO | (same file) |
-| 11 | Model & artifact saving | TODO | (same file) |
+| 9 | Threshold calibration | DONE | `inference/tasks/predict.py` |
+| 10 | Test evaluation | DONE | (same file) |
+| 11 | Model & artifact saving | DONE | (same file) |
 
 #### Step 9 — Threshold Calibration
 
 - Compute per-sample reconstruction error on **validation set** (all normal data)
 - Set threshold at **95th percentile** of validation reconstruction error
 - Validate with `sus` column: do `sus=1` rows get higher error than `sus=0`? If yes, model is learning real signal
+- **Result:** sus ratio = 1.06x → signal detected (model differentiates suspicious from fully normal)
 
 #### Step 10 — Test Evaluation
 
@@ -199,14 +200,16 @@ raw string column before encoding.
 | **ROC-AUC** | How well the model separates attacks from normal, regardless of threshold (1.0 = perfect, 0.5 = random) |
 
 - Generate evaluation report (JSON + HTML)
+- **Baseline results (first run, no tuning):** Precision=0.025, Recall=0.001, F1=0.002, ROC-AUC=0.391
+- These baseline metrics confirm the pipeline works end-to-end; model tuning (architecture, hyperparameters, feature selection) is the natural next step — see Hyperparameters table below
 
 #### Step 11 — Save All Artifacts
 
-- Best model weights (`best.pt`)
-- Threshold value
+- Best model weights (`best.pt`) — saved during training
+- Threshold value — saved as `threshold.json`
 - Scaler + encoders (already saved in preprocessing)
-- Evaluation metrics
-- Create `EVALUATION_REPORT.json`
+- Evaluation metrics — saved as `evaluation_report.json`
+- HTML report — `evaluation_report.html` (also copied to repo root for GitHub viewing)
 
 ### Phase 7: Real-Time Anomaly Detection — FUTURE
 

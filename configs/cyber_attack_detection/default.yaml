@@ -174,6 +174,15 @@ training:
   checkpoint_dir: "~/python_venvs/datasets/kaggle/beth-dataset/artifacts/checkpoints"
 
 # ---------------------------------------------------------------------------
+# Evaluation — threshold calibration and test metrics
+# ---------------------------------------------------------------------------
+# threshold_percentile: the Nth percentile of validation reconstruction
+# errors becomes the anomaly cutoff.  95 = flag anything worse than 95% of
+# normal validation traffic.  Higher = fewer false alarms, lower recall.
+evaluation:
+  threshold_percentile: 95
+
+# ---------------------------------------------------------------------------
 # Report settings
 # ---------------------------------------------------------------------------
 report:
