@@ -1,8 +1,63 @@
-"""Programmatic EDA — generates versioned JSON + HTML reports with cybersecurity analyst insights.
+"""Programmatic EDA — generates versioned JSON, HTML, and Markdown reports.
 
 All dataset-specific constants (splits, columns, report paths, branding) are
-read from req.config (loaded from configs/<pipeline>/default.yaml). This makes
+read from req.config (loaded from configs/<pipeline>/default.yaml).  This makes
 the task reusable for any tabular dataset without code changes.
+
+For the BETH dataset this task performs the following analysis:
+
+  What the BETH dataset is
+  -------------------------
+  BETH = Biased Evaluation of Traces from Honeypots.  Three CSV files
+  containing Linux syscall logs captured from AWS honeypots:
+    training   — 763,144 rows, ALL normal (evil=0).  No attacks at all.
+    validation — 76,478 rows, normal-only, but 1,269 rows flagged "suspicious" (sus=1).
+    testing    — 717,567 rows, ~84% are ATTACKS (evil=1).  Intentional class flip.
+
+  Each row = one syscall event with columns:
+    timestamp, processId, threadId, parentProcessId, userId, mountNamespace,
+    eventId, argsNum, returnValue, args, stackAddresses, processName,
+    hostName, eventName, evil, sus
+
+  What this task produces
+  -----------------------
+  1. Per-split statistics (row counts, dtypes, missing values, class distribution,
+     per-column stats for true-numeric vs categorical-ID vs string columns).
+
+  2. Column classification stats — proves that 6 integer columns (processId,
+     threadId, parentProcessId, userId, mountNamespace, eventId) are categorical
+     identifiers, NOT numeric.  E.g. PID 500 is not "twice" PID 250.
+
+  3. Cross-split analysis — vocabulary overlap (do val/test have unseen process
+     names?) and distribution drift (does argsNum shift between train/test?).
+
+  4. Cybersecurity analyst insights — anomaly detection framing, class imbalance
+     warnings, data drift alerts, the categorical-ID trap, root activity, etc.
+
+  5. Recommendations — an 8-step pipeline the analyst recommends (drop → clean
+     → labels → encode → feature eng → scale → model → evaluate).
+
+  6. Analyst thinking — deep-dive educational content: why we use an autoencoder,
+     what cardinality means, evaluation metrics explained, DL vs ML, and the
+     args column deep-dive showing 90x /proc/ access difference.
+
+  7. Three output files: data_analysis_report_v04.json / .html / .md
+     plus version-free copies at the repo root for easy GitHub viewing.
+
+  What it publishes to ctx_data for downstream tasks
+  ---------------------------------------------------
+  raw_frames           — the loaded DataFrames (reused by cleaning, zero re-reads)
+  splits_config        — {"training": "labelled_training_data.csv", ...}
+  column_classification — full column type map
+  drop_columns         — ["stackAddresses"] (cleaning will drop these)
+  parse_then_drop_columns — ["args"] (feature_engineering will parse then drop)
+  label_columns        — ["evil", "sus"]
+  target_col / aux_col — "evil" / "sus"
+  true_numeric_columns — ["timestamp", "argsNum", "returnValue"]
+  categorical_id_columns — ["processId", "threadId", "parentProcessId",
+                            "userId", "mountNamespace", "eventId"]
+  string_categorical_columns — ["processName", "hostName", "eventName"]
+  all_categorical_columns — string + ID columns combined
 """
 
 import json
@@ -31,27 +86,36 @@ class DataAnalysis(WfTask):
     def execute(self, req: WfReq, resp: WfResp) -> WfResp:
         cfg = req.config
 
+        # ---------- Load all config-driven settings from YAML ------------------
+        # splits: {"training": "labelled_training_data.csv",
+        #          "validation": "labelled_validation_data.csv",
+        #          "testing": "labelled_testing_data.csv"}
         splits = cfg.get("splits", {})
-        report_version = get_cfg(cfg, "report.version", "v01")
+        report_version = get_cfg(cfg, "report.version", "v01")  # e.g. "v04"
         report_dir = Path(get_cfg(cfg, "dataset.paths.report_dir", "."))
-        dataset_name = get_cfg(cfg, "dataset.name", "Dataset")
+        dataset_name = get_cfg(cfg, "dataset.name", "Dataset")  # "BETH Dataset"
 
+        # Column classification — which columns are truly numeric vs categorical
+        # IDs vs string categorical vs droppable.  See the module docstring.
+        # For BETH: true_numeric = [timestamp, argsNum, returnValue]
         true_numeric = col_names(cfg, "true_numeric")
+        # For BETH: categorical_ids = [processId, threadId, parentProcessId,
+        #           userId, mountNamespace, eventId]  (look numeric, ARE categorical)
         categorical_ids = col_names(cfg, "categorical_ids")
+        # For BETH: string_categorical = [processName, hostName, eventName]
         string_categorical = col_names(cfg, "string_categorical")
+        # For BETH: complex_drop = [stackAddresses] (binary call stack, unusable)
         complex_drop = col_names(cfg, "complex_drop")
+        # For BETH: parse_then_drop = [args] (keep for feature eng, drop after)
         parse_then_drop = col_names(cfg, "parse_then_drop")
+        # For BETH: labels = ["evil", "sus"]
         labels = label_cols(cfg)
+        # Full map of every column → its type + treatment explanation
         column_classification = build_column_classification(cfg)
 
-        self._cfg = cfg
-        self._true_numeric = true_numeric
-        self._categorical_ids = categorical_ids
-        self._string_categorical = string_categorical
-        self._labels = labels
-        self._dataset_name = dataset_name
-        self._report_version = report_version
-
+        # ---------- Read raw CSV files from the download directory --------------
+        # raw_data_path was set by the download task, e.g.
+        # ~/python_venvs/datasets/kaggle/beth-dataset/
         raw_data_path = resp.ctx_data.get("raw_data_path")
         if not raw_data_path:
             resp.success = False
@@ -62,6 +126,8 @@ class DataAnalysis(WfTask):
         frames: dict[str, pd.DataFrame] = {}
         split_stats: dict[str, dict] = {}
 
+        # Load each CSV and compute detailed statistics.
+        # For BETH: training (763K rows), validation (76K), testing (717K).
         for split_name, filename in splits.items():
             filepath = data_dir / filename
             if not filepath.exists():
@@ -70,14 +136,34 @@ class DataAnalysis(WfTask):
             log.debug("Analyzing %s (%s)", split_name, filepath.name)
             df = pd.read_csv(filepath)
             frames[split_name] = df
-            split_stats[split_name] = self._analyze_split(df, split_name)
+            split_stats[split_name] = self._analyze_split(
+                df, split_name, true_numeric, categorical_ids,
+            )
 
-        col_class_stats = self._column_classification_stats(frames)
-        insights = self._generate_insights(frames, split_stats)
+        # ---------- Run the analytical engines ---------------------------------
+        # Each method below produces a section of the final report.
+
+        # Proves processId, userId, etc. are categorical (not numeric)
+        col_class_stats = self._column_classification_stats(frames, categorical_ids)
+
+        # Anomaly framing, class imbalance, data drift, root activity, etc.
+        insights = self._generate_insights(
+            frames, split_stats, cfg, true_numeric, string_categorical, categorical_ids,
+        )
+
+        # 8-step pipeline recommendation (drop → clean → … → evaluate)
         recommendations = self._generate_recommendations(frames, split_stats)
-        cross_split = self._cross_split_analysis(frames)
-        analyst_thinking = self._analyst_thinking(frames, split_stats)
 
+        # Vocabulary overlap + distribution drift between train and test
+        cross_split = self._cross_split_analysis(
+            frames, true_numeric, string_categorical, categorical_ids,
+        )
+
+        # Deep-dive educational content: autoencoder, cardinality, metrics,
+        # DL vs ML, and the args column analysis (90x /proc/ signal)
+        analyst_thinking = self._analyst_thinking(frames, split_stats, dataset_name)
+
+        # ---------- Assemble the report dictionary -----------------------------
         report = {
             "dataset_name": dataset_name,
             "dataset_subtitle": get_cfg(cfg, "dataset.subtitle", ""),
@@ -92,6 +178,7 @@ class DataAnalysis(WfTask):
             "analyst_thinking": analyst_thinking,
         }
 
+        # ---------- Save reports: JSON (machine-readable), HTML, Markdown ------
         report_dir.mkdir(parents=True, exist_ok=True)
         json_file = report_dir / f"data_analysis_report_{report_version}.json"
         html_file = report_dir / f"data_analysis_report_{report_version}.html"
@@ -108,6 +195,7 @@ class DataAnalysis(WfTask):
         md_file.write_text(md)
         log.debug("Markdown report saved to %s", md_file)
 
+        # Copy version-free reports to repo root so GitHub shows the latest
         if get_cfg(cfg, "report.copy_to_repo_root", False):
             repo_root = Path(__file__).resolve()
             for parent in repo_root.parents:
@@ -123,14 +211,18 @@ class DataAnalysis(WfTask):
         resp.ctx_data["analysis_html_path"] = str(html_file)
         resp.ctx_data["analysis_report"] = report
 
+        # ---------- Publish data to ctx_data for downstream tasks --------------
+        # These are consumed by cleaning, feature_engineering, encoding, etc.
+        # The raw_frames are passed by reference so cleaning can reuse them
+        # without re-reading the CSVs from disk (saves ~5 seconds on BETH).
         resp.ctx_data["splits_config"] = dict(splits)
         resp.ctx_data["raw_frames"] = frames
         resp.ctx_data["column_classification"] = column_classification
-        resp.ctx_data["drop_columns"] = list(complex_drop)
-        resp.ctx_data["parse_then_drop_columns"] = list(parse_then_drop)
-        resp.ctx_data["label_columns"] = list(labels)
-        resp.ctx_data["target_col"] = labels[0]
-        resp.ctx_data["aux_col"] = labels[1] if len(labels) > 1 else ""
+        resp.ctx_data["drop_columns"] = list(complex_drop)            # → cleaning drops these
+        resp.ctx_data["parse_then_drop_columns"] = list(parse_then_drop)  # → feat eng parses then drops
+        resp.ctx_data["label_columns"] = list(labels)                 # → cleaning separates these
+        resp.ctx_data["target_col"] = labels[0]                       # "evil"
+        resp.ctx_data["aux_col"] = labels[1] if len(labels) > 1 else ""  # "sus"
         resp.ctx_data["true_numeric_columns"] = list(true_numeric)
         resp.ctx_data["categorical_id_columns"] = list(categorical_ids)
         resp.ctx_data["string_categorical_columns"] = list(string_categorical)
@@ -146,15 +238,24 @@ class DataAnalysis(WfTask):
     # Column classification statistics
     # ------------------------------------------------------------------
 
-    def _column_classification_stats(self, frames: dict[str, pd.DataFrame]) -> dict:
-        """Compute per-column stats that prove ID columns are categorical, not numeric."""
+    def _column_classification_stats(
+        self, frames: dict[str, pd.DataFrame], categorical_ids: list[str],
+    ) -> dict:
+        """Compute per-column stats that prove ID columns are categorical, not numeric.
+
+        For BETH: examines processId, threadId, parentProcessId, userId,
+        mountNamespace, and eventId.  These columns are stored as int64 in the
+        CSV so pandas treats them as numeric, but they are actually identifiers.
+        This method generates evidence (cardinality ratio, top-10 coverage,
+        human-readable explanation) for each to justify the "categorical" label.
+        """
         if "training" not in frames:
             return {}
 
         train = frames["training"]
         result = {}
 
-        for col in self._categorical_ids:
+        for col in categorical_ids:
             if col not in train.columns:
                 continue
             unique = train[col].nunique()
@@ -173,6 +274,7 @@ class DataAnalysis(WfTask):
 
     @staticmethod
     def _why_categorical(col: str, df: pd.DataFrame) -> str:
+        """Return a human-readable reason why a BETH column is categorical, not numeric."""
         unique = df[col].nunique()
         total = len(df)
 
@@ -197,7 +299,22 @@ class DataAnalysis(WfTask):
     # Per-split statistics
     # ------------------------------------------------------------------
 
-    def _analyze_split(self, df: pd.DataFrame, split_name: str) -> dict:
+    def _analyze_split(
+        self, df: pd.DataFrame, split_name: str,
+        true_numeric: list[str], categorical_ids: list[str],
+    ) -> dict:
+        """Compute comprehensive statistics for one split (training/validation/testing).
+
+        For BETH training split this produces:
+          - 763,144 rows, 16 columns, ~140 MB in memory
+          - class distribution: evil={0: 763144, 1: 0}, sus={0: 761875, 1: 1269}
+          - true_numeric_stats for timestamp, argsNum, returnValue
+            (min, max, mean, std, quartiles, zero%, negative%)
+          - categorical_id_stats for processId, userId, etc.
+            (unique count, cardinality ratio, top-10 values)
+          - string_categorical_stats for processName, hostName, eventName
+          - missing values, duplicate row count, sus×evil crosstab
+        """
         numeric_cols = df.select_dtypes(include="number").columns.tolist()
         categorical_cols = df.select_dtypes(include="object").columns.tolist()
 
@@ -224,12 +341,12 @@ class DataAnalysis(WfTask):
             },
             "true_numeric_stats": {
                 col: self._numeric_col_stats(df[col])
-                for col in self._true_numeric
+                for col in true_numeric
                 if col in df.columns
             },
             "categorical_id_stats": {
                 col: self._id_col_stats(df[col])
-                for col in self._categorical_ids
+                for col in categorical_ids
                 if col in df.columns
             },
             "string_categorical_stats": {
@@ -260,6 +377,14 @@ class DataAnalysis(WfTask):
 
     @staticmethod
     def _numeric_col_stats(s: pd.Series) -> dict:
+        """Compute distribution stats for a truly numeric column.
+
+        For BETH applied to: timestamp, argsNum, returnValue.
+        The zeros_pct and negative_pct are particularly telling:
+        - argsNum: high zero% means many zero-argument syscalls (simple calls).
+        - returnValue: negative% shows how often syscalls fail (permission denied,
+          file not found) — attacks tend to trigger more failures.
+        """
         return {
             "min": float(s.min()),
             "max": float(s.max()),
@@ -275,6 +400,15 @@ class DataAnalysis(WfTask):
 
     @staticmethod
     def _id_col_stats(s: pd.Series) -> dict:
+        """Compute cardinality stats for a categorical ID column.
+
+        For BETH applied to: processId, threadId, parentProcessId, userId,
+        mountNamespace, eventId.  The key metric is cardinality_pct — e.g.
+        eventId has only ~200 unique values out of 763K rows (0.03%),
+        proving it's an enum-like identifier, not a continuous number.
+        top_10_coverage_pct shows concentration — if the top 10 values
+        cover 80%+ of rows, the column is heavily skewed toward a few IDs.
+        """
         top_10 = s.value_counts().head(10)
         return {
             "unique_count": int(s.nunique()),
@@ -287,14 +421,34 @@ class DataAnalysis(WfTask):
     # Cross-split analysis
     # ------------------------------------------------------------------
 
-    def _cross_split_analysis(self, frames: dict[str, pd.DataFrame]) -> dict:
+    def _cross_split_analysis(
+        self, frames: dict[str, pd.DataFrame],
+        true_numeric: list[str], string_categorical: list[str],
+        categorical_ids: list[str],
+    ) -> dict:
+        """Compare val/test distributions against training to detect drift and unseen values.
+
+        For BETH this answers two questions:
+        1. Vocabulary overlap — are there processNames, userIds, eventIds in
+           val/test that never appeared in training?  Unseen values need special
+           handling (UNKNOWN token) in the label encoder.  For BETH's attack-heavy
+           test set, unseen IDs may themselves be attack indicators.
+        2. Distribution drift — do the truly numeric columns (timestamp, argsNum,
+           returnValue) shift significantly between train and test?  We measure
+           this as a z-score: (test_mean − train_mean) / train_std.  A z > 2.0
+           means significant drift.  For BETH this is expected because the test
+           set contains attacks (returnValue shifts as attackers hit permission
+           errors, argsNum shifts as complex exploit syscalls appear).
+        """
         result = {}
         if "training" not in frames:
             return result
 
         train = frames["training"]
 
-        all_cat_cols = self._string_categorical + self._categorical_ids
+        # Check all categorical columns (both string-type and integer-ID-type)
+        # for values that exist in val/test but NOT in training.
+        all_cat_cols = string_categorical + categorical_ids
         vocab_overlap = {}
         for col in all_cat_cols:
             if col not in train.columns:
@@ -312,7 +466,7 @@ class DataAnalysis(WfTask):
         result["category_unseen_in_training"] = vocab_overlap
 
         drift = {}
-        for col in self._true_numeric:
+        for col in true_numeric:
             if col not in train.columns:
                 continue
             train_mean = float(train[col].mean())
@@ -335,8 +489,28 @@ class DataAnalysis(WfTask):
     # Cybersecurity analyst insights
     # ------------------------------------------------------------------
 
-    def _generate_insights(self, frames: dict[str, pd.DataFrame],
-                           stats: dict[str, dict]) -> list[dict]:
+    def _generate_insights(
+        self, frames: dict[str, pd.DataFrame], stats: dict[str, dict],
+        cfg: dict, true_numeric: list[str], string_categorical: list[str],
+        categorical_ids: list[str],
+    ) -> list[dict]:
+        """Generate cybersecurity analyst insights as structured dicts.
+
+        For BETH this produces insights such as:
+        - "anomaly_framing": training has 0 attacks → must use anomaly detection,
+          not classification.  Recommends autoencoder.
+        - "column_misclassification": 6 int64 columns are actually categorical.
+        - "test_class_imbalance": test set is ~84% attacks (inverted distribution).
+        - "sus_weak_label": 1,269 suspicious rows in training for threshold tuning.
+        - "return_value_signal": negative returnValues indicate syscall failures.
+        - "root_activity": % of events running as root (userId=0).
+        - "eventid_categorical": eventId has only ~200 distinct values — it's an enum.
+        - "duplicates_*": duplicate row warnings per split.
+        - "data_drift": numeric columns with z-shift > 2.0 between train/test.
+        - "unseen_*": categories in val/test not seen in training.
+
+        Each insight has: id, severity (critical/warning/info), title, detail.
+        """
         insights = []
 
         # --- anomaly detection framing ---
@@ -489,8 +663,8 @@ class DataAnalysis(WfTask):
             train = frames["training"]
             test = frames["testing"]
             drifted = []
-            drift_threshold = get_cfg(self._cfg, "analysis.drift_threshold", 2.0)
-            for col in self._true_numeric:
+            drift_threshold = get_cfg(cfg, "analysis.drift_threshold", 2.0)
+            for col in true_numeric:
                 if col not in train.columns:
                     continue
                 t_std = float(train[col].std()) or 1.0
@@ -512,7 +686,7 @@ class DataAnalysis(WfTask):
 
         # --- unseen categories (strings + IDs) ---
         if "training" in frames:
-            for col in self._string_categorical + self._categorical_ids:
+            for col in string_categorical + categorical_ids:
                 if col not in frames["training"].columns:
                     continue
                 train_vals = set(frames["training"][col].dropna().astype(str).unique())
@@ -544,6 +718,18 @@ class DataAnalysis(WfTask):
 
     def _generate_recommendations(self, frames: dict[str, pd.DataFrame],
                                   stats: dict[str, dict]) -> list[dict]:
+        """Return the 8-step pipeline recommendation for BETH.
+
+        This is the analyst's recommended order of operations:
+          1. Cleaning   — drop stackAddresses, KEEP args for later parsing
+          2. Cleaning   — fill missing values using training medians / "UNKNOWN"
+          3. Cleaning   — separate labels (evil, sus) from features
+          4. Encoding   — label-encode all 9 categorical columns (3 string + 6 ID)
+          5. Feature eng — create 11 domain-informed features (6 structured + 5 from args)
+          6. Scaling     — StandardScaler on TRUE numeric only (not on encoded categories)
+          7. Model       — Autoencoder (input→64→32→16→32→64→input)
+          8. Evaluation  — ROC-AUC + F1, threshold via validation sus=1 rows
+        """
         return [
             {
                 "step": "cleaning",
@@ -640,8 +826,25 @@ class DataAnalysis(WfTask):
     # Analyst thinking — educational deep-dive content
     # ------------------------------------------------------------------
 
-    def _analyst_thinking(self, frames: dict[str, pd.DataFrame],
-                          stats: dict[str, dict]) -> dict:
+    def _analyst_thinking(
+        self, frames: dict[str, pd.DataFrame],
+        stats: dict[str, dict], dataset_name: str,
+    ) -> dict:
+        """Generate deep-dive educational content explaining the analytical choices.
+
+        For BETH this creates several educational sections:
+        - "the_core_problem"              — why we can't use a normal classifier
+                                            (0 attacks in training)
+        - "anomaly_detection_approaches"  — autoencoder vs VAE vs isolation forest
+                                            vs one-class SVM vs LSTM
+        - "autoencoder_explained"         — compress→bottleneck→reconstruct analogy
+        - "cardinality_explained"         — what cardinality means in plain English
+        - "evaluation_metrics_explained"  — precision, recall, F1, ROC-AUC for a
+                                            common person
+        - "dl_vs_ml_vs_metrics"           — deep learning vs classical ML vs metrics
+        - "args_column_analysis"          — the 90x /proc/ signal deep-dive
+        - "analyst_perspective"           — synthesis of what the data tells us
+        """
         test_evil = stats.get("testing", {}).get("class_distribution", {}).get("evil", {})
         test_attack = test_evil.get(1, 0)
         test_normal = test_evil.get(0, 0)
@@ -649,7 +852,7 @@ class DataAnalysis(WfTask):
         attack_pct = round(test_attack / test_total * 100, 1) if test_total else 0
 
         return {
-            "_dataset_name": self._dataset_name,
+            "_dataset_name": dataset_name,
             "the_core_problem": {
                 "title": "Why Can't We Use a Normal Classifier?",
                 "summary": (
@@ -890,6 +1093,12 @@ class DataAnalysis(WfTask):
 
     @staticmethod
     def _safe_separation(train_pct: float, attack_pct: float) -> str:
+        """Compute ratio of training vs attack percentages for a signal.
+
+        For BETH: if normal traffic touches /proc/ 34% of the time and attack
+        traffic only 0.4%, this returns "85.0x" — an 85x separation.
+        Returns "inf" when one side is zero, "~" when both are zero.
+        """
         if attack_pct > 0 and train_pct > 0:
             return f"{round(train_pct / attack_pct, 1)}x"
         if train_pct > 0 and attack_pct == 0:
@@ -897,7 +1106,20 @@ class DataAnalysis(WfTask):
         return "~"
 
     def _args_column_deep_dive(self, frames: dict[str, pd.DataFrame]) -> dict:
-        """Analyze the args column to prove it contains strong attack signal."""
+        """Analyze the BETH args column to prove it contains strong attack signals.
+
+        The args column is a JSON-like string of syscall arguments, e.g.:
+          [{"name":"pathname","value":"/proc/self/maps"},
+           {"name":"flags","value":"O_RDONLY|O_CLOEXEC"}]
+
+        This method samples 50K rows from training (normal) and testing (attacks)
+        and counts how often file paths reference /proc/, /etc/, /tmp/, hidden
+        dotfiles, and how often write flags appear.  The results show dramatic
+        differences — e.g. normal traffic accesses /proc/ ~34% of the time while
+        attacks only do it ~0.4%.  This 90x difference is the strongest single
+        signal in the entire dataset, which is why we extract 5 binary features
+        from args in feature_engineering instead of dropping the column.
+        """
         import ast
 
         def compute_signals(df: pd.DataFrame, sample_size: int = 50000) -> dict:
@@ -1052,6 +1274,14 @@ class DataAnalysis(WfTask):
     # ------------------------------------------------------------------
 
     def _render_markdown(self, report: dict) -> str:
+        """Render the full report as a Markdown file for GitHub viewing.
+
+        For BETH this produces a ~500-line document with split summaries,
+        column classification table, analyst insights, recommendations,
+        cross-split drift analysis, and the full educational deep-dive.
+        A version-free copy is placed at the repo root (data_analysis_report.md)
+        so it's readable directly on GitHub without navigating to the reports dir.
+        """
         splits = report.get("splits", {})
         insights = report.get("analyst_insights", [])
         recs = report.get("recommendations", [])
@@ -1299,6 +1529,18 @@ class DataAnalysis(WfTask):
     # ------------------------------------------------------------------
 
     def _render_html(self, report: dict, frames: dict[str, pd.DataFrame]) -> str:
+        """Render a self-contained HTML report with styled tables and charts.
+
+        For BETH this produces a single-file HTML page with:
+        - Split summary table (row counts, attack/normal/suspicious counts)
+        - Column classification table (color-coded: green=numeric, red=categorical ID,
+          purple=string categorical, grey=drop, orange=labels)
+        - Categorical ID evidence cards (cardinality ratio, top-10 values)
+        - Analyst insights (severity-coded: red=critical, yellow=warning, blue=info)
+        - Cross-split drift analysis and unseen-value warnings
+        - Pipeline recommendations table
+        - Full educational deep-dive (autoencoder, metrics, args analysis)
+        """
         insights = report.get("analyst_insights", [])
         recs = report.get("recommendations", [])
         splits = report.get("splits", {})
