@@ -12,7 +12,7 @@
 | **Framework** | DONE | `src/main.py` facade (loads config into `req.config`), `core/common/wfs/` (interfaces, DTOs with `req.df_keys`/`req.label_keys` properties), `core/logger.py`, all 5 sub-workflow facades, `package.json` commands |
 | **Download** | DONE | `kaggle_beth.py` — idempotent Kaggle download, reads dataset ID and paths from config |
 | **Preprocessing** | DONE (5 of 5) | `data_analysis.py` (v04 report, config-driven), `cleaning.py` (config-driven), `feature_engineering.py` (generic engine reads feature specs from YAML), `encoding.py` (LabelEncoder with UNKNOWN handling), `scaling.py` (StandardScaler on 3 true numeric, numpy float32 + .npy artifacts) |
-| **Models** | Empty | Facade ready, `tasks/` empty |
+| **Models** | DONE | `autoencoder.py` — nn.Module (23→64→32→16→32→64→23, 8,295 params), config-driven architecture |
 | **Training** | Empty | Facade ready, `tasks/` empty |
 | **Inference** | Empty | Facade ready, `tasks/` empty |
 
@@ -143,11 +143,11 @@ raw string column before encoding.
 - Convert to numpy `float32` arrays, save as `.npy` files
 - Record `input_dim` (number of features) in `ctx_data` for model creation
 
-### Phase 4: Model Architecture — TODO
+### Phase 4: Model Architecture — DONE
 
 | # | Step | Status | File |
 |---|---|---|---|
-| 7 | Autoencoder definition | TODO | `models/tasks/autoencoder.py` |
+| 7 | Autoencoder definition | DONE | `models/tasks/autoencoder.py` |
 
 - `nn.Module` with encoder → bottleneck → decoder
 - Default architecture: `input_dim → 64 → 32 → 16 → 32 → 64 → input_dim`

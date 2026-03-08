@@ -153,6 +153,18 @@ scaling:
   scale_columns: "auto"   # "auto" = use columns.true_numeric.names from above
 
 # ---------------------------------------------------------------------------
+# Model architecture — autoencoder layer sizes
+# ---------------------------------------------------------------------------
+# For BETH with 23 input features:
+#   encoder: 23 → 64 → 32 → 16 (bottleneck)
+#   decoder: 16 → 32 → 64 → 23
+# Adjust hidden_dims and bottleneck_dim to experiment.
+model:
+  hidden_dims: [64, 32]
+  bottleneck_dim: 16
+  device: "auto"           # "auto" picks cuda > mps > cpu
+
+# ---------------------------------------------------------------------------
 # Report settings
 # ---------------------------------------------------------------------------
 report:
