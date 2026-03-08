@@ -1,0 +1,13 @@
+[project]
+name = "threat-detection-model-deeplearning"
+version = "0.1.0"
+description = "Detecting Cyber Attacks in network traffic using PyTorch"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas",
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "kaggle",
+    "requests",
+]

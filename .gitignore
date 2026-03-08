@@ -201,6 +201,10 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Node (package.json used as task runner only)
+node_modules/
+package-lock.json
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

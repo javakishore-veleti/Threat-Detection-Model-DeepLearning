@@ -1,0 +1,17 @@
+{
+  "name": "threat-detection-model-deeplearning",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Task runner for Threat Detection Deep Learning project — conda env + uv package manager",
+  "config": {
+    "venv_path": "python_venvs/PyTorch/Thread_Detection_Model_DL",
+    "python_version": "3.11"
+  },
+  "scripts": {
+    "setup-initial": "conda create --prefix $HOME/$npm_package_config_venv_path python=$npm_package_config_python_version -y && conda run --prefix $HOME/$npm_package_config_venv_path pip install uv && conda run --prefix $HOME/$npm_package_config_venv_path uv pip install . && echo '' && echo '=====================================' && echo '  Setup complete!' && echo '  Env: ~/$npm_package_config_venv_path' && echo '  Activate: conda activate $HOME/$npm_package_config_venv_path' && echo '====================================='",
+
+    "setup-venv-daily": "conda run --prefix $HOME/$npm_package_config_venv_path python --version && conda run --prefix $HOME/$npm_package_config_venv_path uv pip install . && (grep -q 'alias pytorch_project_tdm=' ~/.zshrc 2>/dev/null || printf '\\nalias pytorch_project_tdm=\"conda activate %s\"\\n' \"$HOME/$npm_package_config_venv_path\" >> ~/.zshrc) && echo '' && echo '=====================================' && echo '  Env ready!' && echo '  Run: source ~/.zshrc  (first time only)' && echo '  Then: pytorch_project_tdm' && echo '====================================='",
+
+    "teardown": "conda env remove --prefix $HOME/$npm_package_config_venv_path -y && echo 'Env removed.'"
+  }
+}
