@@ -11,7 +11,7 @@
 | **Config** | DONE | `configs/cyber_attack_detection/default.yaml` — all dataset-specific constants externalized. `core/config.py` — YAML loader with dot-path accessor, split key derivation, column helpers |
 | **Framework** | DONE | `src/main.py` facade (loads config into `req.config`), `core/common/wfs/` (interfaces, DTOs with `req.df_keys`/`req.label_keys` properties), `core/logger.py`, all 5 sub-workflow facades, `package.json` commands |
 | **Download** | DONE | `kaggle_beth.py` — idempotent Kaggle download, reads dataset ID and paths from config |
-| **Preprocessing** | 3 of 5 done | `data_analysis.py` (v04 report, config-driven), `cleaning.py` (config-driven), `feature_engineering.py` (generic engine reads feature specs from YAML) |
+| **Preprocessing** | 4 of 5 done | `data_analysis.py` (v04 report, config-driven), `cleaning.py` (config-driven), `feature_engineering.py` (generic engine reads feature specs from YAML), `encoding.py` (LabelEncoder with UNKNOWN handling) |
 | **Models** | Empty | Facade ready, `tasks/` empty |
 | **Training** | Empty | Facade ready, `tasks/` empty |
 | **Inference** | Empty | Facade ready, `tasks/` empty |
@@ -74,13 +74,13 @@ All dataset-specific constants live in `configs/<pipeline>/default.yaml`. Tasks 
 - Educational deep-dive: autoencoder explanation, cardinality, evaluation metrics, industry approaches
 - Reports at `~/python_venvs/datasets/kaggle/beth-dataset/reports/`
 
-### Phase 3: Data Preprocessing — IN PROGRESS (3 tasks remaining)
+### Phase 3: Data Preprocessing — IN PROGRESS (1 task remaining)
 
 | # | Step | Status | File |
 |---|---|---|---|
 | 3 | Cleaning | DONE | `preprocessing/tasks/cleaning.py` |
-| 4 | Feature Engineering | TODO | `preprocessing/tasks/feature_engineering.py` |
-| 5 | Encoding | TODO | `preprocessing/tasks/encoding.py` |
+| 4 | Feature Engineering | DONE | `preprocessing/tasks/feature_engineering.py` |
+| 5 | Encoding | DONE | `preprocessing/tasks/encoding.py` |
 | 6 | Scaling | TODO | `preprocessing/tasks/scaling.py` |
 
 #### Step 3 — Cleaning

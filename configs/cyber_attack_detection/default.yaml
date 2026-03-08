@@ -16,6 +16,7 @@ dataset:
   paths:
     data_dir: "~/python_venvs/datasets/kaggle/beth-dataset"
     report_dir: "~/python_venvs/datasets/kaggle/beth-dataset/reports"
+    artifact_dir: "~/python_venvs/datasets/kaggle/beth-dataset/artifacts"
 
 # ---------------------------------------------------------------------------
 # Splits — map logical name → CSV filename
@@ -136,6 +137,12 @@ features:
         arg_name: flags
         patterns: [WRONLY, RDWR, CREAT]
     has_pathname_feature: args_has_pathname
+
+# ---------------------------------------------------------------------------
+# Encoding — categorical column label-encoding
+# ---------------------------------------------------------------------------
+encoding:
+  unknown_token: "UNKNOWN"
 
 # ---------------------------------------------------------------------------
 # Report settings

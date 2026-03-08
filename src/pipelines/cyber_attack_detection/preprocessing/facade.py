@@ -11,7 +11,7 @@ TASKS: list[str] = [
     "data_analysis",
     "cleaning",
     "feature_engineering",
-    # "encoding",
+    "encoding",
     # "scaling",
 ]
 
