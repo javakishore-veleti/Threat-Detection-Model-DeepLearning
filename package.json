@@ -12,7 +12,8 @@
 
     "setup-venv-daily": "conda run --prefix $HOME/$npm_package_config_venv_path python --version && conda run --prefix $HOME/$npm_package_config_venv_path uv pip install . && (grep -q 'alias pytorch_project_tdm=' ~/.zshrc 2>/dev/null || printf '\\nalias pytorch_project_tdm=\"conda activate %s\"\\n' \"$HOME/$npm_package_config_venv_path\" >> ~/.zshrc) && echo '' && echo '=====================================' && echo '  Env ready!' && echo '  Run: source ~/.zshrc  (first time only)' && echo '  Then: pytorch_project_tdm' && echo '====================================='",
 
-    "cyber-attack-detection": "conda run --prefix $HOME/$npm_package_config_venv_path python src/main.py cyber_attack_detection",
+    "cyber-attack-detection": "conda run --prefix $HOME/$npm_package_config_venv_path python src/main.py cyber_attack_detection --epochs 2",
+    "cyber-attack-detection:full": "conda run --prefix $HOME/$npm_package_config_venv_path python src/main.py cyber_attack_detection --epochs 50",
     "cyber-attack-detection:from": "conda run --prefix $HOME/$npm_package_config_venv_path python src/main.py cyber_attack_detection --start-from",
     "cyber-attack-detection:resume": "conda run --prefix $HOME/$npm_package_config_venv_path python src/main.py cyber_attack_detection --resume outputs/checkpoints/cyber_attack_detection/last.pt",
 

@@ -4,6 +4,8 @@ the requested pipeline's MainWf implementation, and calls execute().
 
 Usage:
     python src/main.py <pipeline_name> [--start-from <step>] [--resume <checkpoint>]
+    python src/main.py <pipeline_name> --epochs 2          # quick test run
+    python src/main.py <pipeline_name> --epochs 50         # full training
 """
 
 import argparse
@@ -29,6 +31,8 @@ def parse_args():
                         help="Path to checkpoint file to resume training")
     parser.add_argument("--config", default=None,
                         help="Override config path (default: configs/<pipeline>/default.yaml)")
+    parser.add_argument("--epochs", type=int, default=None,
+                        help="Override training.num_epochs (e.g. --epochs 2 for quick test)")
     return parser.parse_args()
 
 
@@ -36,6 +40,10 @@ def main():
     args = parse_args()
 
     cfg = load_config(args.pipeline, args.config)
+
+    if args.epochs is not None:
+        cfg.setdefault("training", {})["num_epochs"] = args.epochs
+        log.debug("Epoch override: training.num_epochs = %d", args.epochs)
 
     req = WfReq(
         pipeline=args.pipeline,

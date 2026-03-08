@@ -270,6 +270,12 @@ class Predict(WfTask):
         html_path.write_text(html)
         log.debug("Evaluation HTML saved to %s", html_path)
 
+        # Save Markdown report (viewable directly on GitHub)
+        md = _render_evaluation_md(report)
+        md_path = report_dir / "evaluation_report.md"
+        md_path.write_text(md)
+        log.debug("Evaluation MD saved to %s", md_path)
+
         # Copy to repo root for easy GitHub viewing
         if get_cfg(cfg, "report.copy_to_repo_root", False):
             repo_root = Path(__file__).resolve()
@@ -278,7 +284,8 @@ class Predict(WfTask):
                     repo_root = parent
                     break
             (repo_root / "evaluation_report.html").write_text(html)
-            log.debug("Evaluation report copied to repo root")
+            (repo_root / "evaluation_report.md").write_text(md)
+            log.debug("Evaluation reports copied to repo root")
 
         # Save threshold as a standalone artifact
         threshold_path = artifact_dir / "threshold.json"
@@ -458,6 +465,105 @@ def _render_evaluation_html(report: dict) -> str:
 
 </body>
 </html>"""
+
+
+def _render_evaluation_md(report: dict) -> str:
+    """Render a Markdown evaluation report (viewable on GitHub)."""
+    metrics = report["test_evaluation"]["metrics"]
+    cm = metrics["confusion_matrix"]
+    thresh = report["threshold_calibration"]
+    training = report["training"]
+    sus = thresh.get("sus_analysis", {})
+    test_stats = report["test_evaluation"]["test_error_stats"]
+    val_stats = thresh["val_error_stats"]
+    ds_name = report.get("dataset_name", "Dataset")
+    arch = report.get("model_architecture", {})
+
+    hidden = arch.get("hidden_dims", [])
+    reversed_hidden = list(reversed(hidden))
+    input_dim = arch.get("input_dim", "?")
+    bottleneck = arch.get("bottleneck_dim", "?")
+
+    sus_md = ""
+    if sus:
+        signal = "Signal detected" if sus.get("signal_detected") else "No signal"
+        sus_md = (
+            f"\n**Suspicious Row Sanity Check:**\n"
+            f"- sus=1 mean error: {sus.get('sus_mean_error', '?')}\n"
+            f"- sus=0 mean error: {sus.get('normal_mean_error', '?')}\n"
+            f"- Ratio: {sus.get('ratio', '?')}x — **{signal}**\n"
+        )
+
+    loss_rows = ""
+    train_losses = training.get("train_losses", [])
+    val_losses = training.get("val_losses", [])
+    for i, (tl, vl) in enumerate(zip(train_losses, val_losses)):
+        loss_rows += f"| {i+1} | {tl:.6f} | {vl:.4f} |\n"
+
+    best_val = training.get("best_val_loss")
+    best_val_str = f"{best_val:.6f}" if best_val is not None else "?"
+
+    return f"""# {ds_name} — Model Evaluation Report
+
+> Generated: {report.get('generated_at', '')}
+
+## Architecture
+
+`{input_dim}` → `{hidden}` → `{bottleneck}` → `{reversed_hidden}` → `{input_dim}`
+
+---
+
+## Key Metrics
+
+| Metric | Value |
+|--------|-------|
+| **Precision** | {metrics['precision']:.4f} |
+| **Recall** | {metrics['recall']:.4f} |
+| **F1 Score** | {metrics['f1_score']:.4f} |
+| **ROC-AUC** | {metrics['roc_auc']:.4f} |
+
+---
+
+## Confusion Matrix
+
+| | Predicted Normal | Predicted Attack |
+|---|---|---|
+| **Actual Normal** | {cm['true_negatives']:,} | {cm['false_positives']:,} (false alarms) |
+| **Actual Attack** | {cm['false_negatives']:,} (missed) | {cm['true_positives']:,} (caught) |
+
+Total: {metrics['test_set']['total_rows']:,} rows ({metrics['test_set']['actual_attacks']:,} attacks, {metrics['test_set']['actual_normal']:,} normal)
+
+---
+
+## Threshold Calibration
+
+| | Value |
+|---|---|
+| **Threshold** | {thresh['threshold']:.6f} (p{thresh['percentile']}) |
+| **Val Error Range** | {val_stats['min']:.6f} — {val_stats['max']:.6f} (median: {val_stats['median']:.6f}) |
+| **Test Error Range** | {test_stats['min']:.6f} — {test_stats['max']:.6f} (median: {test_stats['median']:.6f}) |
+{sus_md}
+---
+
+## Training History
+
+- **Epochs:** {training.get('epochs', 0)}
+- **Learning Rate:** {training.get('lr', '?')}
+- **Batch Size:** {training.get('batch_size', '?')}
+- **Best Val Loss:** {best_val_str}
+
+<details>
+<summary>Epoch-by-epoch losses</summary>
+
+| Epoch | Train Loss | Val Loss |
+|-------|-----------|----------|
+{loss_rows}
+</details>
+
+---
+
+*{ds_name} Evaluation Report — Generated programmatically by the predict task*
+"""
 
 
 Task = Predict
