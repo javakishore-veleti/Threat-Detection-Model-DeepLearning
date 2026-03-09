@@ -1,6 +1,6 @@
 # BETH Dataset — Data Analysis Report
 
-**Version:** v04 | **Generated:** 2026-03-09T00:01:49.142879+00:00 | **Splits:** 3
+**Version:** v04 | **Generated:** 2026-03-09T00:09:47.598998+00:00 | **Splits:** 3
 
 ## Dataset Overview
 

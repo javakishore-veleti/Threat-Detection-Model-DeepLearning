@@ -8,6 +8,7 @@
          max-width: 960px; margin: 40px auto; padding: 0 20px; color: #333; line-height:1.6; }
   h1 { border-bottom: 3px solid #007bff; padding-bottom: 8px; }
   h2 { color: #007bff; margin-top: 32px; }
+  h3 { color: #555; margin-top: 24px; }
   table { border-collapse: collapse; width: 100%; margin: 16px 0; }
   th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
   th { background: #f8f9fa; }
@@ -15,128 +16,187 @@
                   padding: 16px 24px; margin: 8px; text-align: center; min-width: 140px; }
   .metric-val { font-size: 2em; font-weight: bold; }
   .metric-label { font-size: 0.85em; color: #666; }
+  .metric-grade { font-size: 0.75em; color: #999; }
+  .callout { padding: 12px 16px; margin: 16px 0; border-radius: 4px; }
+  .callout-blue { background: #e7f3fe; border-left: 4px solid #2196F3; }
+  .callout-red { background: #fde8e8; border-left: 4px solid #dc3545; }
+  .callout-green { background: #e8f5e9; border-left: 4px solid #28a745; }
+  .commentary { background: #fffbea; border-left: 4px solid #ffc107; padding: 12px 16px;
+                 margin: 8px 0; border-radius: 4px; font-size: 0.95em; }
 </style>
 </head>
 <body>
 
 <h1>BETH Dataset — Model Evaluation Report</h1>
-<p>Generated: 2026-03-09T00:02:52.877004+00:00</p>
-<p>Architecture: 23 → [64, 32] →
-   16 → [32, 64] →
+<p>Generated: 2026-03-09T00:10:53.486835+00:00</p>
+<p>Architecture: 23 &rarr; [64, 32] &rarr;
+   16 &rarr; [32, 64] &rarr;
    23</p>
 
-<h2>Key Metrics</h2>
+<h2>Key Metrics at a Glance</h2>
 <div>
   <div class="metric-card">
-    <div class="metric-val" style="color:#dc3545">0.0055</div>
+    <div class="metric-val" style="color:#dc3545">0.0116</div>
     <div class="metric-label">Precision</div>
+    <div class="metric-grade">Very poor</div>
   </div>
   <div class="metric-card">
-    <div class="metric-val" style="color:#dc3545">0.0002</div>
+    <div class="metric-val" style="color:#dc3545">0.0005</div>
     <div class="metric-label">Recall</div>
+    <div class="metric-grade">Very poor</div>
   </div>
   <div class="metric-card">
-    <div class="metric-val" style="color:#dc3545">0.0004</div>
+    <div class="metric-val" style="color:#dc3545">0.0010</div>
     <div class="metric-label">F1 Score</div>
+    <div class="metric-grade">Very poor</div>
   </div>
   <div class="metric-card">
-    <div class="metric-val" style="color:#dc3545">0.3839</div>
+    <div class="metric-val" style="color:#dc3545">0.4022</div>
     <div class="metric-label">ROC-AUC</div>
+    <div class="metric-grade">Poor</div>
   </div>
 </div>
 
-<h2>What Do These Metrics Mean?</h2>
+<h2>Before We Dive In — Key Terms (No Jargon)</h2>
+
+<p>Imagine our model looks at 188,967 network events and
+   for each one says either <strong>"this looks normal"</strong> or
+   <strong>"this looks like an attack!"</strong>. After it's done, we compare
+   its guesses to the real answers and count four things:</p>
+
 <table>
   <tr>
-    <th style="width:130px">Metric</th>
-    <th>Definition</th>
-    <th>In Plain English (BETH context)</th>
-    <th style="width:80px">Ideal</th>
+    <th style="width:200px">Term</th>
+    <th>What It Means</th>
+    <th>Our Numbers</th>
   </tr>
-  <tr>
-    <td><strong>Precision</strong></td>
-    <td>TP / (TP + FP)<br><em>Of everything the model flagged as an attack, what fraction actually was?</em></td>
-    <td>If the model raises 100 alarms, precision tells you how many are real attacks
-        vs false alarms. Low precision = your security team wastes time chasing ghosts.</td>
-    <td>1.0</td>
+  <tr style="background:#e8f5e9">
+    <td><strong>True Positive (TP)</strong><br>Correctly caught</td>
+    <td>The model said <em>"Attack!"</em> and it really WAS an attack. <strong>This is what we want most.</strong></td>
+    <td style="font-size:1.2em"><strong>81</strong></td>
   </tr>
-  <tr>
-    <td><strong>Recall</strong></td>
-    <td>TP / (TP + FN)<br><em>Of all real attacks in the data, what fraction did the model catch?</em></td>
-    <td>If there are 1,000 real cyber attacks, recall tells you how many the model
-        detected. <strong>This is the most important metric for security</strong> —
-        a missed attack can mean a breach. Low recall = attacks slip through.</td>
-    <td>1.0</td>
+  <tr style="background:#fde8e8">
+    <td><strong>False Positive (FP)</strong><br>False alarm</td>
+    <td>The model said <em>"Attack!"</em> but it was actually normal traffic.
+        Like a fire alarm going off when someone burns toast — annoying, wastes time,
+        but not dangerous.</td>
+    <td style="font-size:1.2em"><strong>6,901</strong></td>
   </tr>
-  <tr>
-    <td><strong>F1 Score</strong></td>
-    <td>2 &times; (Precision &times; Recall) / (Precision + Recall)<br>
-        <em>Harmonic mean — a balanced "grade" combining both.</em></td>
-    <td>If precision is high but recall is low (or vice versa), F1 will be low too.
-        It only scores well when <em>both</em> precision and recall are good.
-        Think of it as a single number that says "how useful is this model overall?"</td>
-    <td>1.0</td>
+  <tr style="background:#fde8e8">
+    <td><strong>False Negative (FN)</strong><br>Missed attack</td>
+    <td>The model said <em>"Looks normal"</em> but it was actually an attack.
+        <strong>This is the most dangerous mistake</strong> — like a security guard
+        letting a burglar walk right past. The attack goes undetected.</td>
+    <td style="font-size:1.2em"><strong>158,351</strong></td>
   </tr>
-  <tr>
-    <td><strong>ROC-AUC</strong></td>
-    <td>Area Under the Receiver Operating Characteristic curve<br>
-        <em>How well can the model separate attacks from normal traffic at ANY threshold?</em></td>
-    <td>Unlike the other three metrics which depend on our chosen threshold (p95),
-        ROC-AUC measures the model's raw ability to rank attack rows higher than normal rows.
-        0.5 = random coin flip (useless), 1.0 = perfect separation.
-        This tells you whether the model learned anything meaningful, regardless of
-        where you set the alarm cutoff.</td>
-    <td>1.0</td>
+  <tr style="background:#e8f5e9">
+    <td><strong>True Negative (TN)</strong><br>Correctly ignored</td>
+    <td>The model said <em>"Looks normal"</em> and it really WAS normal. Good — no
+        unnecessary alarm.</td>
+    <td style="font-size:1.2em"><strong>23,634</strong></td>
   </tr>
 </table>
-<div style="background:#e7f3fe;border-left:4px solid #2196F3;padding:12px;margin:16px 0;border-radius:4px">
-  <strong>Security tradeoff:</strong> In cyber attack detection, <strong>Recall &gt; Precision</strong>.
-  Missing a real attack (false negative) is far more dangerous than a false alarm (false positive).
-  A SOC analyst can dismiss a false alarm in seconds — but a missed intrusion can lead to data
-  breach, ransomware, or lateral movement. When tuning the threshold, prioritise recall.
+
+<h2>What Each Metric Means — and How Our Model Did</h2>
+
+<h3>1. Precision — "When the alarm goes off, is it real?"</h3>
+<p><strong>Formula:</strong> Correctly caught attacks / All alarms raised = TP / (TP + FP)</p>
+<p>Think of it like this: if a fire alarm rings 100 times, how many times was there
+   actually a fire? If 90 out of 100 were real fires, precision = 0.90 (great!).
+   If only 2 out of 100 were real, precision = 0.02 (terrible — 98% false alarms).</p>
+<p><strong>Scale:</strong> 0.0 (every alarm is fake) → 1.0 (every alarm is a real attack)</p>
+<div class="commentary">
+  <strong>Our result: 0.0116 (Very poor)</strong><br>
+  Our model flagged 6,982 rows as attacks. Out of those, only 81 were real attacks and 6,901 were false alarms. That means 1.2% of the alarms were correct — almost every alarm is a false alarm. The security team would be overwhelmed with noise. This needs significant improvement.
+</div>
+
+<h3>2. Recall — "Of all real attacks, how many did we catch?"</h3>
+<p><strong>Formula:</strong> Correctly caught attacks / All real attacks = TP / (TP + FN)</p>
+<p>This is like asking: if 100 burglars tried to enter a building, how many did
+   security actually stop? If security caught 95 out of 100, recall = 0.95. If they
+   only caught 1, recall = 0.01 — 99 burglars got through.</p>
+<p><strong>Scale:</strong> 0.0 (caught nothing) → 1.0 (caught every single attack)</p>
+<div class="commentary">
+  <strong>Our result: 0.0005 (Very poor)</strong><br>
+  There were 158,432 real attacks in the test set. Our model caught 81 of them and missed 158,351. That means it detected only 0.05% of the attacks — almost every attack slipped through undetected. This is the most critical problem — in cybersecurity, a missed attack can mean a data breach, ransomware infection, or full network compromise.
+</div>
+
+<div class="callout callout-blue">
+  <strong>Why Recall matters more than Precision in cybersecurity:</strong>
+  A false alarm (FP) is annoying — a security analyst spends 5 minutes checking and
+  says "never mind". A missed attack (FN) can mean ransomware encrypting your servers,
+  customer data stolen, or attackers moving deeper into the network. In security,
+  <strong>we'd rather have 1,000 false alarms than miss 1 real attack</strong>.
+</div>
+
+<h3>3. F1 Score — "Overall report card"</h3>
+<p><strong>Formula:</strong> 2 &times; (Precision &times; Recall) / (Precision + Recall)</p>
+<p>If a student gets 100% in math but 0% in English, their average (50%) doesn't
+   tell the full story. F1 is similar — it's a special average that stays low unless
+   <em>both</em> precision and recall are good. It punishes imbalance.</p>
+<p><strong>Scale:</strong> 0.0 (useless) → 1.0 (perfect at both catching attacks AND avoiding false alarms)</p>
+<div class="commentary">
+  <strong>Our result: 0.0010 (Very poor)</strong><br>
+  F1 = 0.0010 (very poor). Both precision and recall are very low, so the combined score is near zero. The model is not yet useful as a detector — it needs more training or architectural changes.
+</div>
+
+<h3>4. ROC-AUC — "Does the model understand the difference at all?"</h3>
+<p><strong>Full name:</strong> Area Under the Receiver Operating Characteristic Curve</p>
+<p>All the metrics above depend on our chosen threshold (the cutoff line that decides
+   "normal vs attack"). ROC-AUC ignores the threshold entirely and asks a deeper
+   question: <em>if I pick one random attack and one random normal event, how often
+   does the model give the attack a higher suspicion score?</em></p>
+<p><strong>Scale:</strong> 0.5 (coin flip — model learned nothing) → 1.0 (perfect — attack scores are always higher than normal scores)</p>
+<div class="commentary">
+  <strong>Our result: 0.4022 (Poor)</strong><br>
+  ROC-AUC = 0.4022. This is below 0.5, which means the model is doing WORSE than random guessing. A coin flip would perform better. The model may have learned inverted patterns (giving low error to attacks and high error to normal data). This is a strong sign that the model needs more training epochs, different architecture, or better features.
 </div>
 
 <h2>Confusion Matrix</h2>
 <table>
-  <tr><th></th><th>Predicted Normal</th><th>Predicted Attack</th></tr>
-  <tr><th>Actual Normal</th><td>23,847</td>
-      <td style="color:#dc3545">6,688 (false alarms)</td></tr>
-  <tr><th>Actual Attack</th>
-      <td style="color:#dc3545">158,395 (missed)</td>
-      <td style="color:#28a745">37 (caught)</td></tr>
+  <tr><th></th><th>Model said "Normal"</th><th>Model said "Attack!"</th></tr>
+  <tr><th>Actually Normal</th>
+      <td style="background:#e8f5e9">23,634 &#10004; correct</td>
+      <td style="background:#fde8e8">6,901 &#9888; false alarms</td></tr>
+  <tr><th>Actually an Attack</th>
+      <td style="background:#fde8e8">158,351 &#9888; missed!</td>
+      <td style="background:#e8f5e9">81 &#10004; caught!</td></tr>
 </table>
 <p>Total: 188,967 rows
-   (158,432 attacks,
-    30,535 normal)</p>
+   (158,432 real attacks,
+    30,535 normal events)</p>
 
 <h2>Threshold Calibration</h2>
+<p>The threshold is the cutoff line: any event with a reconstruction error above this
+   number is flagged as an attack. We set it at the 95th percentile
+   of validation errors — meaning only 5% of normal traffic would trigger a false alarm.</p>
 <table>
-  <tr><th>Threshold</th><td>597.193176 (p95)</td></tr>
+  <tr><th>Threshold</th><td>363.057648 (p95)</td></tr>
   <tr><th>Val Error Range</th>
-      <td>0.006648 — 3213.692139 (median: 0.045826)</td></tr>
+      <td>0.014050 — 3215.280518 (median: 0.075999)</td></tr>
   <tr><th>Test Error Range</th>
-      <td>0.195655 — 2111.081299 (median: 62.549549)</td></tr>
+      <td>0.125771 — 3183.831787 (median: 46.708324)</td></tr>
 </table>
 
         <div style="background:#dc354510;border-left:4px solid #dc3545;
                     padding:12px;margin:16px 0;border-radius:4px">
             <strong>Suspicious Row Sanity Check:</strong>
-            sus=1 mean error: 31.370281,
-            sus=0 mean error: 46.565701,
-            ratio: 0.6737x →
+            sus=1 mean error: 30.138968,
+            sus=0 mean error: 38.46986,
+            ratio: 0.7834x →
             <strong style="color:#dc3545">No signal</strong>
         </div>
 
 <h2>Training History</h2>
 <p>2 epochs, lr=0.001,
    batch_size=256,
-   best_val_loss=46.502502</p>
+   best_val_loss=38.435210</p>
 <details>
 <summary>Show epoch-by-epoch losses</summary>
 <table>
   <tr><th>Epoch</th><th>Train Loss</th><th>Val Loss</th></tr>
-  <tr><td>1</td><td>96.625159</td><td>47.7224</td></tr>
-<tr><td>2</td><td>0.212395</td><td>46.5025</td></tr>
+  <tr><td>1</td><td>67.457176</td><td>39.1953</td></tr>
+<tr><td>2</td><td>0.221892</td><td>38.4352</td></tr>
 
 </table>
 </details>
