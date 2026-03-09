@@ -423,6 +423,57 @@ def _render_evaluation_html(report: dict) -> str:
   </div>
 </div>
 
+<h2>What Do These Metrics Mean?</h2>
+<table>
+  <tr>
+    <th style="width:130px">Metric</th>
+    <th>Definition</th>
+    <th>In Plain English (BETH context)</th>
+    <th style="width:80px">Ideal</th>
+  </tr>
+  <tr>
+    <td><strong>Precision</strong></td>
+    <td>TP / (TP + FP)<br><em>Of everything the model flagged as an attack, what fraction actually was?</em></td>
+    <td>If the model raises 100 alarms, precision tells you how many are real attacks
+        vs false alarms. Low precision = your security team wastes time chasing ghosts.</td>
+    <td>1.0</td>
+  </tr>
+  <tr>
+    <td><strong>Recall</strong></td>
+    <td>TP / (TP + FN)<br><em>Of all real attacks in the data, what fraction did the model catch?</em></td>
+    <td>If there are 1,000 real cyber attacks, recall tells you how many the model
+        detected. <strong>This is the most important metric for security</strong> —
+        a missed attack can mean a breach. Low recall = attacks slip through.</td>
+    <td>1.0</td>
+  </tr>
+  <tr>
+    <td><strong>F1 Score</strong></td>
+    <td>2 &times; (Precision &times; Recall) / (Precision + Recall)<br>
+        <em>Harmonic mean — a balanced "grade" combining both.</em></td>
+    <td>If precision is high but recall is low (or vice versa), F1 will be low too.
+        It only scores well when <em>both</em> precision and recall are good.
+        Think of it as a single number that says "how useful is this model overall?"</td>
+    <td>1.0</td>
+  </tr>
+  <tr>
+    <td><strong>ROC-AUC</strong></td>
+    <td>Area Under the Receiver Operating Characteristic curve<br>
+        <em>How well can the model separate attacks from normal traffic at ANY threshold?</em></td>
+    <td>Unlike the other three metrics which depend on our chosen threshold (p{thresh['percentile']}),
+        ROC-AUC measures the model's raw ability to rank attack rows higher than normal rows.
+        0.5 = random coin flip (useless), 1.0 = perfect separation.
+        This tells you whether the model learned anything meaningful, regardless of
+        where you set the alarm cutoff.</td>
+    <td>1.0</td>
+  </tr>
+</table>
+<div style="background:#e7f3fe;border-left:4px solid #2196F3;padding:12px;margin:16px 0;border-radius:4px">
+  <strong>Security tradeoff:</strong> In cyber attack detection, <strong>Recall &gt; Precision</strong>.
+  Missing a real attack (false negative) is far more dangerous than a false alarm (false positive).
+  A SOC analyst can dismiss a false alarm in seconds — but a missed intrusion can lead to data
+  breach, ransomware, or lateral movement. When tuning the threshold, prioritise recall.
+</div>
+
 <h2>Confusion Matrix</h2>
 <table>
   <tr><th></th><th>Predicted Normal</th><th>Predicted Attack</th></tr>
@@ -521,6 +572,19 @@ def _render_evaluation_md(report: dict) -> str:
 | **Recall** | {metrics['recall']:.4f} |
 | **F1 Score** | {metrics['f1_score']:.4f} |
 | **ROC-AUC** | {metrics['roc_auc']:.4f} |
+
+---
+
+## What Do These Metrics Mean?
+
+| Metric | Formula | In Plain English (BETH context) | Ideal |
+|--------|---------|--------------------------------|-------|
+| **Precision** | TP / (TP + FP) | Of everything the model flagged as an attack, what fraction actually was? Low precision = your security team wastes time chasing false alarms. | 1.0 |
+| **Recall** | TP / (TP + FN) | Of all real attacks in the data, what fraction did the model catch? **Most important for security** — a missed attack can mean a breach. Low recall = attacks slip through undetected. | 1.0 |
+| **F1 Score** | 2 x (P x R) / (P + R) | Harmonic mean — a balanced "grade" combining both precision and recall. Only scores well when *both* are good. Think of it as a single number that says "how useful is this model overall?" | 1.0 |
+| **ROC-AUC** | Area Under ROC Curve | Unlike the other three metrics (which depend on the chosen threshold p{thresh['percentile']}), ROC-AUC measures the model's raw ability to rank attack rows higher than normal rows. 0.5 = random coin flip (useless), 1.0 = perfect separation. Tells you whether the model learned anything meaningful, regardless of threshold. | 1.0 |
+
+> **Security tradeoff:** In cyber attack detection, **Recall > Precision**. Missing a real attack (false negative) is far more dangerous than a false alarm (false positive). A SOC analyst can dismiss a false alarm in seconds — but a missed intrusion can lead to data breach, ransomware, or lateral movement. When tuning the threshold, prioritise recall.
 
 ---
 
